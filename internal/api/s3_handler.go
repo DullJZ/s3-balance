@@ -223,8 +223,8 @@ func (h *S3Handler) handleListBuckets(w http.ResponseWriter, r *http.Request) {
 	}
 	
 	for _, b := range buckets {
-		// 只显示启用的存储桶（包括虚拟存储桶）
-		if b.IsAvailable() && b.Config.Enabled {
+		// 只显示启用的虚拟存储桶，对客户端隐藏底层真实存储桶
+		if b.IsAvailable() && b.Config.Enabled && b.Config.Virtual {
 			result.Buckets.Bucket = append(result.Buckets.Bucket, BucketInfo{
 				Name:         b.Config.Name,
 				CreationDate: time.Now().Add(-24 * time.Hour), // 模拟创建时间

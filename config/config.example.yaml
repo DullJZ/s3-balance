@@ -37,7 +37,7 @@ database:
 
 # S3存储桶配置
 buckets:
-  # 真实存储桶 - AWS S3（用于存储数据）
+  # 真实存储桶 - AWS S3（用于存储数据，对客户端隐藏）
   - name: "my-bucket-1"
     endpoint: ""  # 留空使用默认AWS端点
     region: "us-east-1"
@@ -50,7 +50,7 @@ buckets:
     path_style: false  # AWS S3使用虚拟主机风格
     virtual: false  # 这是真实存储桶
 
-  # 真实存储桶 - MinIO（用于存储数据）
+  # 真实存储桶 - MinIO（用于存储数据，对客户端隐藏）
   - name: "my-bucket-2"
     endpoint: "http://localhost:9000"
     region: "us-east-1"
@@ -63,7 +63,7 @@ buckets:
     path_style: true  # MinIO通常使用路径风格
     virtual: false  # 这是真实存储桶
 
-  # 虚拟存储桶 - user-bucket-1（用户可见，但实际存储在真实存储桶中）
+  # 虚拟存储桶 - user-bucket-1（对客户端可见的唯一存储桶）
   - name: "user-bucket-1"
     endpoint: ""  # 虚拟存储桶不需要端点
     region: "us-east-1"
@@ -76,7 +76,7 @@ buckets:
     path_style: false
     virtual: true  # 这是虚拟存储桶
 
-  # 虚拟存储桶 - user-bucket-2（用户可见，但实际存储在真实存储桶中）
+  # 虚拟存储桶 - user-bucket-2（对客户端可见的唯一存储桶）
   - name: "user-bucket-2"
     endpoint: ""
     region: "us-east-1"
@@ -89,7 +89,7 @@ buckets:
     path_style: false
     virtual: true  # 这是虚拟存储桶
 
-  # 真实存储桶 - 阿里云OSS（备用存储桶）
+  # 真实存储桶 - 阿里云OSS（备用存储桶，对客户端隐藏）
   - name: "my-bucket-3"
     endpoint: "https://oss-cn-hangzhou.aliyuncs.com"
     region: "cn-hangzhou"
