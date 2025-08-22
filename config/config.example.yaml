@@ -1,0 +1,129 @@
+# S3 Balance Service Configuration Example
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+# 数据库配置
+database:
+  # 数据库类型: sqlite, mysql, postgres
+  type: "sqlite"
+  
+  # 数据源名称 (DSN)
+  # SQLite 示例:
+  dsn: "data/s3-balance.db"
+  
+  # MySQL 示例:
+  # dsn: "user:password@tcp(localhost:3306)/s3balance?charset=utf8mb4&parseTime=True&loc=Local"
+  
+  # PostgreSQL 示例:
+  # dsn: "host=localhost user=postgres password=password dbname=s3balance port=5432 sslmode=disable TimeZone=Asia/Shanghai"
+  
+  # 连接池配置
+  max_open_conns: 25      # 最大打开连接数
+  max_idle_conns: 5       # 最大空闲连接数
+  conn_max_lifetime: 300  # 连接最大生命周期（秒）
+  
+  # 日志级别: silent, error, warn, info
+  log_level: "warn"
+  
+  # 是否自动迁移数据库表
+  auto_migrate: true
+
+# S3存储桶配置
+buckets:
+  # 第一个存储桶 - AWS S3
+  - name: "my-bucket-1"
+    endpoint: ""  # 留空使用默认AWS端点
+    region: "us-east-1"
+    access_key_id: "YOUR_AWS_ACCESS_KEY_ID"
+    secret_access_key: "YOUR_AWS_SECRET_ACCESS_KEY"
+    max_size: "10GB"  # 最大容量限制
+    weight: 10  # 权重（用于加权负载均衡）
+    enabled: true
+    use_ssl: true
+    path_style: false  # AWS S3使用虚拟主机风格
+
+  # 第二个存储桶 - MinIO
+  - name: "my-bucket-2"
+    endpoint: "http://localhost:9000"
+    region: "us-east-1"
+    access_key_id: "minioadmin"
+    secret_access_key: "minioadmin"
+    max_size: "5GB"
+    weight: 5
+    enabled: true
+    use_ssl: false
+    path_style: true  # MinIO通常使用路径风格
+
+  # 第三个存储桶 - 阿里云OSS（兼容S3）
+  - name: "my-bucket-3"
+    endpoint: "https://oss-cn-hangzhou.aliyuncs.com"
+    region: "cn-hangzhou"
+    access_key_id: "YOUR_ALIYUN_ACCESS_KEY_ID"
+    secret_access_key: "YOUR_ALIYUN_SECRET_ACCESS_KEY"
+    max_size: "20GB"
+    weight: 15
+    enabled: true
+    use_ssl: true
+    path_style: false
+
+  # 备用存储桶（可以禁用）
+  - name: "backup-bucket"
+    endpoint: "http://backup-s3.example.com"
+    region: "us-west-2"
+    access_key_id: "BACKUP_ACCESS_KEY"
+    secret_access_key: "BACKUP_SECRET_KEY"
+    max_size: "100GB"
+    weight: 1
+    enabled: false  # 当前禁用
+    use_ssl: false
+    path_style: true
+
+# 负载均衡配置
+balancer:
+  # 负载均衡策略，可选值：
+  # - "round-robin": 轮询
+  # - "least-space": 选择剩余空间最多的存储桶
+  # - "weighted": 基于权重的随机选择
+  # - "consistent-hash": 一致性哈希（相同的key总是选择相同的存储桶）
+  strategy: "least-space"
+  
+  # 健康检查周期
+  health_check_period: 30s
+  
+  # 统计信息更新周期
+  update_stats_period: 60s
+  
+  # 重试配置
+  retry_attempts: 3
+  retry_delay: 1s
+
+# 监控指标配置
+metrics:
+  enabled: true
+  path: "/metrics"
+  port: 9090
+
+# S3兼容API配置
+s3api:
+  # 客户端连接用的Access Key
+  access_key: "AKIAIOSFODNN7EXAMPLE"
+  
+  # 客户端连接用的Secret Key
+  secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  
+  # 是否使用虚拟主机模式
+  virtual_host: false
+  
+  # 工作模式：
+  # false (默认)：预签名重定向模式，客户端直接与后端存储交互
+  # true：代理模式，数据通过S3 Balance服务器传输
+  proxy_mode: false
+  
+  # 是否需要认证（开发环境可设为false）
+  auth_required: false

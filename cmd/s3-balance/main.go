@@ -1,0 +1,182 @@
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/DullJZ/s3-balance/internal/api"
+	"github.com/DullJZ/s3-balance/internal/balancer"
+	"github.com/DullJZ/s3-balance/internal/bucket"
+	"github.com/DullJZ/s3-balance/internal/config"
+	"github.com/DullJZ/s3-balance/internal/database"
+	"github.com/DullJZ/s3-balance/internal/storage"
+	"github.com/DullJZ/s3-balance/pkg/presigner"
+	"github.com/gorilla/mux"
+)
+
+func main() {
+	// 解析命令行参数
+	var configFile string
+	flag.StringVar(&configFile, "config", "config/config.yaml", "Path to configuration file")
+	flag.Parse()
+
+	// 加载配置
+	cfg, err := config.Load(configFile)
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
+	}
+
+	// 初始化数据库
+	if err := database.Initialize(&cfg.Database); err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+	defer database.Close()
+
+	// 创建存储桶管理器
+	bucketManager, err := bucket.NewManager(cfg)
+	if err != nil {
+		log.Fatalf("Failed to create bucket manager: %v", err)
+	}
+
+	// 启动存储桶管理器（健康检查和统计更新）
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	bucketManager.Start(ctx)
+
+	// 创建负载均衡器
+	lb, err := balancer.NewBalancer(bucketManager, &cfg.Balancer)
+	if err != nil {
+		log.Fatalf("Failed to create balancer: %v", err)
+	}
+
+	// 创建预签名URL生成器
+	signer := presigner.NewPresigner(
+		15*time.Minute,  // 上传URL有效期
+		60*time.Minute,  // 下载URL有效期
+	)
+
+	// 创建存储服务
+	storageService := storage.NewService(database.GetDB())
+
+	// 创建S3兼容API处理器
+	s3Handler := api.NewS3Handler(
+		bucketManager,
+		lb,
+		signer,
+		storageService,
+		cfg.S3API.AccessKey,
+		cfg.S3API.SecretKey,
+	)
+
+	// 设置路由
+	router := mux.NewRouter()
+	
+	// 运行在S3兼容模式
+	log.Println("Running in S3-compatible mode")
+	s3Handler.RegisterS3Routes(router)
+
+	// 添加CORS中间件
+	router.Use(corsMiddleware)
+
+	// 添加日志中间件
+	router.Use(loggingMiddleware)
+
+	// 创建HTTP服务器
+	srv := &http.Server{
+		Addr:         fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port),
+		Handler:      router,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
+	}
+
+	// 启动服务器
+	go func() {
+		log.Printf("Starting S3 Balance Service on %s", srv.Addr)
+		log.Printf("Load balancing strategy: %s", cfg.Balancer.Strategy)
+		log.Printf("Managed buckets: %d", len(cfg.Buckets))
+		
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// 等待中断信号
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+
+	// 优雅关闭
+	log.Println("Shutting down server...")
+	
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	// 停止存储桶管理器
+	bucketManager.Stop()
+	cancel()
+
+	log.Println("Server stopped")
+}
+
+// CORS中间件
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		
+		next.ServeHTTP(w, r)
+	})
+}
+
+// 日志中间件
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		
+		// 包装ResponseWriter以捕获状态码
+		wrapped := &responseWriter{
+			ResponseWriter: w,
+			statusCode:     http.StatusOK,
+		}
+		
+		next.ServeHTTP(wrapped, r)
+		
+		log.Printf(
+			"[%s] %s %s %d %v",
+			r.RemoteAddr,
+			r.Method,
+			r.RequestURI,
+			wrapped.statusCode,
+			time.Since(start),
+		)
+	})
+}
+
+// responseWriter 包装器用于捕获状态码
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
+}
