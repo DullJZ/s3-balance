@@ -61,7 +61,7 @@ func (VirtualBucketMapping) TableName() string {
 // UploadSession 上传会话模型（用于跟踪分片上传）
 type UploadSession struct {
 	ID             uint           `gorm:"primaryKey" json:"id"`
-	UploadID       string         `gorm:"uniqueIndex;size:255;not null" json:"upload_id"`
+	UploadID       string         `gorm:"uniqueIndex;size:512;not null" json:"upload_id"` // 增加到512字符以支持长uploadID
 	Key            string         `gorm:"index;size:512;not null" json:"key"`
 	BucketName     string         `gorm:"index;size:255;not null" json:"bucket_name"`
 	TotalParts     int            `gorm:"not null;default:0" json:"total_parts"`

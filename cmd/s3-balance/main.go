@@ -65,6 +65,9 @@ func main() {
 	// 创建存储服务
 	storageService := storage.NewService(database.GetDB())
 
+	// 启动定期清理过期上传会话的任务
+	startSessionCleaner(ctx, storageService)
+
 	// 创建S3兼容API处理器
 	s3Handler := api.NewS3Handler(
 		bucketManager,
@@ -179,4 +182,52 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// startSessionCleaner 启动定期清理过期会话的任务
+func startSessionCleaner(ctx context.Context, storageService *storage.Service) {
+	go func() {
+		// 初始延迟，避免启动时立即执行
+		time.Sleep(1 * time.Minute)
+		
+		// 每小时清理一次过期的上传会话
+		ticker := time.NewTicker(1 * time.Hour)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-ctx.Done():
+				log.Println("Stopping session cleaner")
+				return
+			case <-ticker.C:
+				log.Println("Cleaning expired upload sessions...")
+				if err := storageService.CleanExpiredSessions(); err != nil {
+					log.Printf("Failed to clean expired sessions: %v", err)
+				} else {
+					log.Println("Successfully cleaned expired upload sessions")
+				}
+				
+				// 同时中止在S3存储桶中过期的分片上传
+				cleanupS3MultipartUploads(ctx, storageService)
+			}
+		}
+	}()
+}
+
+// cleanupS3MultipartUploads 清理S3存储桶中过期的分片上传
+func cleanupS3MultipartUploads(ctx context.Context, storageService *storage.Service) {
+	// 获取所有过期的会话
+	sessions, err := storageService.GetPendingUploadSessions("", "", "", 0)
+	if err != nil {
+		log.Printf("Failed to get pending sessions for cleanup: %v", err)
+		return
+	}
+	
+	for _, session := range sessions {
+		if session.IsExpired() {
+			log.Printf("Found expired session: uploadID=%s, key=%s", session.UploadID, session.Key)
+			// 此处可以添加调用S3 AbortMultipartUpload的逻辑
+			// 但需要知道对应的真实存储桶信息
+		}
+	}
 }

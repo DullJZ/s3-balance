@@ -301,6 +301,41 @@ func (s *Service) UpdateUploadSession(uploadID string, completedParts int, statu
 	return nil
 }
 
+// GetPendingUploadSessions 获取正在进行中的上传会话
+func (s *Service) GetPendingUploadSessions(prefix string, keyMarker string, uploadIdMarker string, maxUploads int) ([]*UploadSession, error) {
+	query := s.db.Model(&UploadSession{}).Where("status = ?", "pending")
+	
+	// 根据前缀过滤
+	if prefix != "" {
+		query = query.Where("`key` LIKE ?", prefix+"%")
+	}
+	
+	// 分页标记处理
+	if keyMarker != "" {
+		if uploadIdMarker != "" {
+			// 如果同时指定了key和uploadId标记
+			query = query.Where("(`key` > ? OR (`key` = ? AND upload_id > ?))", keyMarker, keyMarker, uploadIdMarker)
+		} else {
+			query = query.Where("`key` > ?", keyMarker)
+		}
+	}
+	
+	// 限制返回数量
+	if maxUploads > 0 {
+		query = query.Limit(maxUploads + 1) // 多查询一个以判断是否截断
+	}
+	
+	// 按key和uploadID排序
+	query = query.Order("`key` ASC, upload_id ASC")
+	
+	var sessions []*UploadSession
+	if err := query.Find(&sessions).Error; err != nil {
+		return nil, fmt.Errorf("failed to get pending upload sessions: %w", err)
+	}
+	
+	return sessions, nil
+}
+
 // CleanExpiredSessions 清理过期的上传会话
 func (s *Service) CleanExpiredSessions() error {
 	if err := s.db.Where("expires_at < ? AND status = ?", time.Now(), "pending").
