@@ -43,6 +43,18 @@ func (h *S3Handler) handleBucketOperations(w http.ResponseWriter, r *http.Reques
 	vars := mux.Vars(r)
 	bucketName := vars["bucket"]
 
+	// 记录操作指标
+	start := time.Now()
+	method := r.Method
+	var status = "success"
+	defer func() {
+		if h.metrics != nil {
+			duration := time.Since(start).Seconds()
+			h.metrics.RecordS3Operation(method, bucketName, status)
+			h.metrics.RecordS3OperationDuration(method, bucketName, duration)
+		}
+	}()
+
 	switch r.Method {
 	case "GET":
 		h.handleListObjects(w, r, bucketName)

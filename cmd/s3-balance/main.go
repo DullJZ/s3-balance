@@ -16,9 +16,11 @@ import (
 	"github.com/DullJZ/s3-balance/internal/bucket"
 	"github.com/DullJZ/s3-balance/internal/config"
 	"github.com/DullJZ/s3-balance/internal/database"
+	"github.com/DullJZ/s3-balance/internal/metrics"
 	"github.com/DullJZ/s3-balance/internal/storage"
 	"github.com/DullJZ/s3-balance/pkg/presigner"
 	"github.com/gorilla/mux"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
@@ -39,8 +41,11 @@ func main() {
 	}
 	defer database.Close()
 
+	// 创建指标服务
+	metricsService := metrics.New()
+
 	// 创建存储桶管理器
-	bucketManager, err := bucket.NewManager(cfg)
+	bucketManager, err := bucket.NewManager(cfg, metricsService)
 	if err != nil {
 		log.Fatalf("Failed to create bucket manager: %v", err)
 	}
@@ -55,6 +60,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create balancer: %v", err)
 	}
+	
+	// 设置指标服务
+	lb.SetMetrics(metricsService)
 
 	// 创建预签名URL生成器
 	signer := presigner.NewPresigner(
@@ -76,10 +84,17 @@ func main() {
 		storageService,
 		cfg.S3API.AccessKey,
 		cfg.S3API.SecretKey,
+		metricsService,
 	)
 
 	// 设置路由
 	router := mux.NewRouter()
+	
+	// 添加指标端点
+	if cfg.Metrics.Enabled {
+		router.Path(cfg.Metrics.Path).Handler(promhttp.Handler())
+		log.Printf("Metrics server enabled at %s", cfg.Metrics.Path)
+	}
 	
 	// 运行在S3兼容模式
 	log.Println("Running in S3-compatible mode")

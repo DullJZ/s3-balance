@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/DullJZ/s3-balance/internal/balancer"
 	"github.com/DullJZ/s3-balance/internal/bucket"
+	"github.com/DullJZ/s3-balance/internal/metrics"
 	"github.com/DullJZ/s3-balance/internal/storage"
 	"github.com/DullJZ/s3-balance/pkg/presigner"
 	"github.com/gorilla/mux"
@@ -16,6 +17,7 @@ type S3Handler struct {
 	storage       *storage.Service
 	accessKey     string
 	secretKey     string
+	metrics       *metrics.Metrics
 }
 
 // NewS3Handler 创建新的S3兼容API处理器
@@ -26,6 +28,7 @@ func NewS3Handler(
 	storage *storage.Service,
 	accessKey string,
 	secretKey string,
+	metrics *metrics.Metrics,
 ) *S3Handler {
 	return &S3Handler{
 		bucketManager: bucketManager,
@@ -34,6 +37,7 @@ func NewS3Handler(
 		storage:       storage,
 		accessKey:     accessKey,
 		secretKey:     secretKey,
+		metrics:       metrics,
 	}
 }
 

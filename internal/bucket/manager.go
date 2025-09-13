@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DullJZ/s3-balance/internal/config"
+	"github.com/DullJZ/s3-balance/internal/metrics"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -29,14 +30,16 @@ type Manager struct {
 	mu       sync.RWMutex
 	config   *config.Config
 	stopChan chan struct{}
+	metrics  *metrics.Metrics
 }
 
 // NewManager 创建新的存储桶管理器
-func NewManager(cfg *config.Config) (*Manager, error) {
+func NewManager(cfg *config.Config, metrics *metrics.Metrics) (*Manager, error) {
 	m := &Manager{
 		buckets:  make(map[string]*BucketInfo),
 		config:   cfg,
 		stopChan: make(chan struct{}),
+		metrics:  metrics,
 	}
 
 	// 初始化所有存储桶客户端
@@ -185,6 +188,11 @@ func (m *Manager) checkBucket(ctx context.Context, bucket *BucketInfo) {
 	bucket.Available = err == nil
 	bucket.LastChecked = time.Now()
 	bucket.mu.Unlock()
+
+	// 更新指标
+	if m.metrics != nil {
+		m.metrics.SetBucketHealthy(bucket.Config.Name, bucket.Config.Endpoint, bucket.Available)
+	}
 }
 
 // updateAllStats 更新所有存储桶的统计信息
@@ -239,6 +247,11 @@ func (m *Manager) updateBucketStats(ctx context.Context, bucket *BucketInfo) {
 	bucket.mu.Lock()
 	bucket.UsedSize = totalSize
 	bucket.mu.Unlock()
+
+	// 更新指标
+	if m.metrics != nil {
+		m.metrics.SetBucketUsage(bucket.Config.Name, totalSize, bucket.Config.MaxSizeBytes)
+	}
 }
 
 // GetBucket 获取指定名称的存储桶

@@ -5,6 +5,7 @@ import (
 
 	"github.com/DullJZ/s3-balance/internal/bucket"
 	"github.com/DullJZ/s3-balance/internal/config"
+	"github.com/DullJZ/s3-balance/internal/metrics"
 )
 
 // Balancer 负载均衡器
@@ -13,6 +14,7 @@ type Balancer struct {
 	manager  *bucket.Manager
 	strategy Strategy
 	config   *config.BalancerConfig
+	metrics  *metrics.Metrics
 }
 
 // NewBalancer 创建新的负载均衡器
@@ -37,6 +39,7 @@ func NewBalancer(manager *bucket.Manager, cfg *config.BalancerConfig) (*Balancer
 		manager:  manager,
 		strategy: strategy,
 		config:   cfg,
+		metrics:  nil, // 将在main.go中设置
 	}, nil
 }
 
@@ -67,6 +70,11 @@ func (b *Balancer) SelectBucket(key string, size int64) (*bucket.BucketInfo, err
 		return nil, err
 	}
 
+	// 记录指标
+	if b.metrics != nil && selected != nil {
+		b.metrics.RecordBalancerDecision(b.strategy.Name(), selected.Config.Name)
+	}
+
 	return selected, nil
 }
 
@@ -95,6 +103,11 @@ func (b *Balancer) SetStrategy(strategyName string) error {
 	
 	b.strategy = strategy
 	return nil
+}
+
+// SetMetrics 设置指标服务
+func (b *Balancer) SetMetrics(metrics *metrics.Metrics) {
+	b.metrics = metrics
 }
 
 // GetAvailableBuckets 获取所有可用的存储桶
