@@ -1,0 +1,21 @@
+{{- if .Values.monitoring.enabled }}
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "s3-balance.fullname" . }}
+  namespace: {{ .Values.prometheusRule.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "s3-balance.labels" . | nindent 4 }}
+    {{- with .Values.prometheusRule.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+  - name: {{ include "s3-balance.name" . }}
+    rules:
+{{- with .Values.prometheusRule.rules }}
+{{ toYaml . | indent 6 }}
+{{- end }}
+{{- end }}
+{{- end }}

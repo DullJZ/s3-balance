@@ -1,0 +1,56 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-balance-config
+  namespace: s3-balance
+  labels:
+    app: s3-balance
+data:
+  config.yaml: |
+    # Kubernetes 生产环境配置
+    server:
+      host: "0.0.0.0"
+      port: 8080
+      read_timeout: 30s
+      write_timeout: 30s
+      idle_timeout: 60s
+
+    database:
+      type: "sqlite"
+      dsn: "/app/data/s3-balance.db"
+      max_open_conns: 50
+      max_idle_conns: 10
+      conn_max_lifetime: 600
+      log_level: "info"
+      auto_migrate: true
+
+    buckets:
+      # 示例配置 - 请替换为实际存储桶
+      - name: "prod-bucket-1"
+        endpoint: "http://minio-svc:9000"
+        region: "us-east-1"
+        access_key_id: "minioadmin"
+        secret_access_key: "minioadmin"
+        max_size: "100GB"
+        weight: 10
+        enabled: true
+        use_ssl: false
+        path_style: true
+        virtual: false
+
+    balancer:
+      strategy: "least-space"
+      health_check_period: 30s
+      update_stats_period: 60s
+
+    metrics:
+      enabled: true
+      path: "/metrics"
+      port: 8080
+
+    s3api:
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      virtual_host: false
+      proxy_mode: false
+      auth_required: false

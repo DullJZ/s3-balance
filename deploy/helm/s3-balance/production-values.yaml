@@ -1,0 +1,155 @@
+# HELM Values 生产环境配置
+replicaCount: 3
+
+image:
+  repository: your-registry.com/s3-balance
+  tag: v1.0.0
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: s3-balance.your-domain.com
+      paths:
+        - path: /
+          pathType: Prefix
+      tls:
+        - secretName: s3-balance-tls
+          hosts:
+            - s3-balance.your-domain.com
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+config:
+  configYaml: |
+    # 生产环境配置
+    server:
+      host: "0.0.0.0"
+      port: 8080
+      read_timeout: 30s
+      write_timeout: 30s
+      idle_timeout: 60s
+
+    database:
+      type: "sqlite"
+      dsn: "/app/data/s3-balance.db"
+      max_open_conns: 100
+      max_idle_conns: 20
+      conn_max_lifetime: 600
+      log_level: "warn"
+      auto_migrate: true
+
+    buckets:
+      # 生产存储桶配置
+      - name: "prod-minio"
+        endpoint: "https://your-minio-endpoint.com"
+        region: "us-east-1"
+        access_key_id: "CHANGEME"
+        secret_access_key: "CHANGEME"
+        max_size: "500GB"
+        weight: 10
+        enabled: true
+        use_ssl: true
+        path_style: true
+        virtual: false
+
+    balancer:
+      strategy: "least-space"
+      health_check_period: 30s
+      update_stats_period: 60s
+
+    metrics:
+      enabled: true
+      path: "/metrics"
+      port: 8080
+
+    s3api:
+      access_key: "your-access-key"
+      secret_key: "your-secret-key"
+      virtual_host: false
+      proxy_mode: false
+      auth_required: true
+
+persistence:
+  enabled: true
+  storageClass: "fast-ssd"
+  accessMode: ReadWriteOnce
+  size: 20Gi
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring
+    interval: 30s
+    scrapeTimeout: 10s
+    labels:
+      release: prometheus
+
+prometheusRule:
+  enabled: true
+  namespace: monitoring
+  labels:
+    release: prometheus
+  rules:
+    - alert: BucketDown
+      expr: up{job="s3-balance"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "S3 Balance 服务不可用"
+        description: "S3 Balance 服务已经连续5分钟不可用"
+    - alert: HighErrorRate
+      expr: rate(s3_balance_s3_operations_total{status="error"}[5m]) > 0.05
+      for: 2m
+      labels:
+        severity: warning
+      annotations:
+        summary: "高错误率告警"
+        description: "错误率超过5%，操作类型: {{ $labels.operation }}"
+
+nodeSelector:
+  disktype: ssd
+
+tolerations:
+  - key: "highcpu"
+    operator: "Equal"
+    value: "true"
+    effect: "NoSchedule"
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/name
+          operator: In
+          values:
+          - s3-balance
+      topologyKey: kubernetes.io/hostname

@@ -1,0 +1,20 @@
+apiVersion: v2
+name: s3-balance
+description: A Helm chart for S3 Balance load balancing service
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+icon: https://helm.sh/img/helm.svg
+keywords:
+  - s3
+  - storage
+  - load-balancer
+  - object-storage
+  - minio
+  - aws-s3
+home: https://github.com/example/s3-balance
+sources:
+  - https://github.com/example/s3-balance
+maintainers:
+  - name: S3 Balance Team
+    email: admin@example.com

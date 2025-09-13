@@ -1,0 +1,73 @@
+# S3 Balance 告警规则
+groups:
+  - name: s3_balance_alerts
+    rules:
+      # 存储桶不健康告警
+      - alert: BucketUnhealthy
+        expr: s3_balance_bucket_healthy == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "存储桶 {{ $labels.bucket }} 不健康"
+          description: "存储桶 {{ $labels.bucket }} ({{ $labels.endpoint }}) 已经连续5分钟不可用"
+
+      # 错误率过高告警
+      - alert: HighErrorRate
+        expr: rate(s3_balance_s3_operations_total{status="error"}[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "存储桶 {{ $labels.bucket }} 错误率过高"
+          description: "存储桶 {{ $labels.bucket }} 错误率超过10%，操作: {{ $labels.operation }}"
+
+      # 操作延迟过高告警
+      - alert: HighLatency
+        expr: histogram_quantile(0.95, rate(s3_balance_s3_operation_duration_seconds_bucket[5m])) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.operation }} 操作延迟过高"
+          description: "{{ $labels.operation }} 操作95%分位数延迟超过1秒"
+
+      # 存储桶使用率告警
+      - alert: BucketUsageHigh
+        expr: s3_balance_bucket_usage_bytes / s3_balance_bucket_capacity_bytes > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "存储桶 {{ $labels.bucket }} 使用率过高"
+          description: "存储桶 {{ $labels.bucket }} 使用率超过90%"
+
+      # 存储桶满告警
+      - alert: BucketFull
+        expr: s3_balance_bucket_usage_bytes / s3_balance_bucket_capacity_bytes >= 0.95
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "存储桶 {{ $labels.bucket }} 即将满了"
+          description: "存储桶 {{ $labels.bucket }} 使用率达到95%"
+
+      # QPS过低告警 (可能服务异常)
+      - alert: LowQPS
+        expr: rate(s3_balance_s3_operations_total[5m]) == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "QPS异常低"
+          description: "系统QPS为0，可能服务异常无请求"
+
+      # 负载均衡失败告警
+      - alert: BalancerDecisionFailure
+        expr: increase(s3_balance_balancer_decisions_total[5m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "负载均衡决策异常"
+          description: "5分钟内没有负载均衡决策，可能存储桶全部不可用"

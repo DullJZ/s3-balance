@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: s3-balance
+  labels:
+    app: s3-balance
+    tier: backend

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: s3-balance-servicemonitor
+description: A Helm chart for ServiceMonitor to monitor S3 Balance
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+
+# Usage:
+# helm install s3-balance-monitoring ./s3-balance-servicemonitor -n monitoring

@@ -1,0 +1,174 @@
+# 默认值
+replicaCount: 3
+
+image:
+  repository: s3-balance
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: [ ]
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: { }
+  name: ""
+
+podAnnotations: { }
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 2000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: { }
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/rewrite-target: /
+  hosts:
+    - host: s3-balance.local
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: { }
+
+tolerations: [ ]
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - s3-balance
+        topologyKey: kubernetes.io/hostname
+
+config:
+  # S3 Balance 配置
+  configYaml: |
+    # HELM 配置的 S3 Balance
+    server:
+      host: "0.0.0.0"
+      port: 8080
+      read_timeout: 30s
+      write_timeout: 30s
+      idle_timeout: 60s
+
+    database:
+      type: "sqlite"
+      dsn: "/app/data/s3-balance.db"
+      max_open_conns: 50
+      max_idle_conns: 10
+      conn_max_lifetime: 600
+      log_level: "info"
+      auto_migrate: true
+
+    buckets:
+      # 示例配置 - 请根据实际情况修改
+      - name: "minio-bucket"
+        endpoint: "http://minio:9000"
+        region: "us-east-1"
+        access_key_id: "minioadmin"
+        secret_access_key: "minioadmin"
+        max_size: "50GB"
+        weight: 10
+        enabled: true
+        use_ssl: false
+        path_style: true
+        virtual: false
+
+    balancer:
+      strategy: "least-space"
+      health_check_period: 30s
+      update_stats_period: 60s
+
+    metrics:
+      enabled: true
+      path: "/metrics"
+      port: 8080
+
+    s3api:
+      access_key: "AKIAIOSFODNN7EXAMPLE"
+      secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+      virtual_host: false
+      proxy_mode: false
+      auth_required: false
+
+# 监控配置
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    namespace: ""
+    interval: 30s
+    scrapeTimeout: 10s
+    labels: { }
+
+# PrometheusRule 配置
+prometheusRule:
+  enabled: true
+  namespace: ""
+  labels: { }
+  rules:
+    - alert: HighErrorRate
+      expr: rate(s3_balance_s3_operations_total{status="error"}[5m]) > 0.1
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "S3 Balance 错误率过高"
+        description: "S3 Balance 错误率超过10%: {{ $labels.operation }}"
+    - alert: HighLatency
+      expr: histogram_quantile(0.95, rate(s3_balance_s3_operation_duration_seconds_bucket[5m])) > 1
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "操作延迟过高"
+        description: "操作延迟 P95 超过1秒"
+
+# 持久化存储
+persistence:
+  enabled: true
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 5Gi
