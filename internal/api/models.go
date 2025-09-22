@@ -40,6 +40,7 @@ type ListBucketResult struct {
 	Prefix         string         `xml:"Prefix"`
 	Marker         string         `xml:"Marker"`
 	MaxKeys        int            `xml:"MaxKeys"`
+	Delimiter      string         `xml:"Delimiter,omitempty"`
 	IsTruncated    bool           `xml:"IsTruncated"`
 	Contents       []ObjectInfo   `xml:"Contents"`
 	CommonPrefixes []CommonPrefix `xml:"CommonPrefixes,omitempty"`

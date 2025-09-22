@@ -92,7 +92,7 @@ func (h *S3Handler) handleListObjectsForVirtualBucket(w http.ResponseWriter, r *
 	prefix := r.URL.Query().Get("prefix")
 	marker := r.URL.Query().Get("marker")
 	maxKeysStr := r.URL.Query().Get("max-keys")
-	// delimiter := r.URL.Query().Get("delimiter") // 暂时不支持delimiter
+	delimiter := r.URL.Query().Get("delimiter")
 
 	maxKeys := 1000
 	if maxKeysStr != "" {
@@ -114,9 +114,14 @@ func (h *S3Handler) handleListObjectsForVirtualBucket(w http.ResponseWriter, r *
 		Prefix:      prefix,
 		Marker:      marker,
 		MaxKeys:     maxKeys,
+		Delimiter:   delimiter,
 		IsTruncated: false,
 		Contents:    make([]ObjectInfo, 0, len(objects)),
+		CommonPrefixes: make([]CommonPrefix, 0),
 	}
+
+	// 用于跟踪已添加的公共前缀
+	prefixSet := make(map[string]bool)
 
 	// 过滤对象并转换为S3格式
 	for _, obj := range objects {
@@ -130,6 +135,30 @@ func (h *S3Handler) handleListObjectsForVirtualBucket(w http.ResponseWriter, r *
 			continue
 		}
 
+		// 如果设置了delimiter，处理目录结构
+		if delimiter != "" {
+			// 移除prefix部分，然后查找delimiter
+			keyAfterPrefix := obj.Key
+			if prefix != "" {
+				keyAfterPrefix = strings.TrimPrefix(obj.Key, prefix)
+			}
+
+			// 查找delimiter的位置
+			delimiterPos := strings.Index(keyAfterPrefix, delimiter)
+			if delimiterPos >= 0 {
+				// 这是一个"目录"
+				commonPrefix := prefix + keyAfterPrefix[:delimiterPos+1]
+				if !prefixSet[commonPrefix] {
+					result.CommonPrefixes = append(result.CommonPrefixes, CommonPrefix{
+						Prefix: commonPrefix,
+					})
+					prefixSet[commonPrefix] = true
+				}
+				continue
+			}
+		}
+
+		// 添加到结果中
 		result.Contents = append(result.Contents, ObjectInfo{
 			Key:          obj.Key,
 			LastModified: obj.UpdatedAt,
@@ -139,9 +168,14 @@ func (h *S3Handler) handleListObjectsForVirtualBucket(w http.ResponseWriter, r *
 	}
 
 	// 如果超过了最大数量，设置截断标志
-	if len(result.Contents) > maxKeys {
-		result.Contents = result.Contents[:maxKeys]
-		result.IsTruncated = true
+	totalItems := len(result.Contents) + len(result.CommonPrefixes)
+	if totalItems > maxKeys {
+		// 简化处理：如果总数超过maxKeys，截断Contents
+		if len(result.Contents) > maxKeys {
+			result.Contents = result.Contents[:maxKeys]
+			result.IsTruncated = true
+			result.CommonPrefixes = nil
+		}
 	}
 
 	h.sendXMLResponse(w, http.StatusOK, result)
