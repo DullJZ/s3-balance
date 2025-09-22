@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/DullJZ/s3-balance/internal/config"
+	"github.com/DullJZ/s3-balance/internal/health"
 	"github.com/DullJZ/s3-balance/internal/metrics"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -19,18 +20,20 @@ type BucketInfo struct {
 	Config      config.BucketConfig
 	Client      *s3.Client
 	UsedSize    int64     // 已使用容量（字节）
-	Available   bool      // 是否可用
-	LastChecked time.Time // 最后检查时间
+	Available   bool      // 是否可用（由health监控更新）
+	LastChecked time.Time // 最后检查时间（由health监控更新）
 	mu          sync.RWMutex
 }
 
 // Manager 存储桶管理器
 type Manager struct {
-	buckets  map[string]*BucketInfo
-	mu       sync.RWMutex
-	config   *config.Config
-	stopChan chan struct{}
-	metrics  *metrics.Metrics
+	buckets       map[string]*BucketInfo
+	mu            sync.RWMutex
+	config        *config.Config
+	stopChan      chan struct{}
+	metrics       *metrics.Metrics
+	healthMonitor *health.Monitor
+	statsMonitor  *health.StatsMonitor
 }
 
 // NewManager 创建新的存储桶管理器
@@ -62,6 +65,9 @@ func NewManager(cfg *config.Config, metrics *metrics.Metrics) (*Manager, error) 
 
 		m.buckets[bucketCfg.Name] = info
 	}
+
+	// 初始化健康监控
+	m.initHealthMonitoring()
 
 	return m, nil
 }
@@ -105,152 +111,78 @@ func createS3Client(bucketCfg config.BucketConfig) (*s3.Client, error) {
 	return client, nil
 }
 
+// initHealthMonitoring 初始化健康监控系统
+func (m *Manager) initHealthMonitoring() {
+	// 创建指标报告器
+	reporter := NewMetricsReporter(m.metrics, m)
+
+	// 创建健康检查配置
+	healthConfig := health.Config{
+		Strategy: health.StrategySimple,
+		Interval: m.config.Balancer.HealthCheckPeriod,
+		Timeout:  5 * time.Second,
+		Retries:  1,
+	}
+
+	// 创建S3健康检查器
+	healthChecker := health.NewS3Checker(healthConfig)
+
+	// 创建健康监控器
+	m.healthMonitor = health.NewMonitor(healthChecker, reporter)
+
+	// 创建统计收集器
+	statsCollector := health.NewS3StatsCollector(30 * time.Second)
+
+	// 创建统计监控器
+	m.statsMonitor = health.NewStatsMonitor(
+		statsCollector,
+		m.config.Balancer.UpdateStatsPeriod,
+		reporter,
+	)
+
+	// 注册所有非虚拟存储桶到监控系统
+	for _, bucket := range m.buckets {
+		if bucket.Config.Virtual {
+			continue
+		}
+
+		target := &health.S3Target{
+			ID:       bucket.Config.Name,
+			Bucket:   bucket.Config.Name,
+			Endpoint: bucket.Config.Endpoint,
+			Client:   bucket.Client,
+		}
+
+		m.healthMonitor.RegisterTarget(target)
+		m.statsMonitor.RegisterTarget(target)
+	}
+}
+
 // Start 启动管理器（健康检查和统计更新）
 func (m *Manager) Start(ctx context.Context) {
-	// 启动健康检查
-	go m.healthCheckLoop(ctx)
-	
-	// 启动统计更新
-	go m.statsUpdateLoop(ctx)
+	// 启动健康监控
+	if m.healthMonitor != nil {
+		m.healthMonitor.Start(ctx)
+	}
+
+	// 启动统计监控
+	if m.statsMonitor != nil {
+		m.statsMonitor.Start(ctx)
+	}
 }
 
 // Stop 停止管理器
 func (m *Manager) Stop() {
 	close(m.stopChan)
-}
-
-// healthCheckLoop 健康检查循环
-func (m *Manager) healthCheckLoop(ctx context.Context) {
-	ticker := time.NewTicker(m.config.Balancer.HealthCheckPeriod)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.stopChan:
-			return
-		case <-ticker.C:
-			m.checkAllBuckets(ctx)
-		}
+	
+	// 停止健康监控
+	if m.healthMonitor != nil {
+		m.healthMonitor.Stop()
 	}
-}
-
-// statsUpdateLoop 统计更新循环
-func (m *Manager) statsUpdateLoop(ctx context.Context) {
-	ticker := time.NewTicker(m.config.Balancer.UpdateStatsPeriod)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-m.stopChan:
-			return
-		case <-ticker.C:
-			m.updateAllStats(ctx)
-		}
-	}
-}
-
-// checkAllBuckets 检查所有存储桶的健康状态
-func (m *Manager) checkAllBuckets(ctx context.Context) {
-	m.mu.RLock()
-	buckets := make([]*BucketInfo, 0, len(m.buckets))
-	for _, b := range m.buckets {
-		buckets = append(buckets, b)
-	}
-	m.mu.RUnlock()
-
-	var wg sync.WaitGroup
-	for _, bucket := range buckets {
-		wg.Add(1)
-		go func(b *BucketInfo) {
-			defer wg.Done()
-			m.checkBucket(ctx, b)
-		}(bucket)
-	}
-	wg.Wait()
-}
-
-// checkBucket 检查单个存储桶
-func (m *Manager) checkBucket(ctx context.Context, bucket *BucketInfo) {
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-
-	// 尝试列出存储桶（用于健康检查）
-	_, err := bucket.Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-		Bucket:  aws.String(bucket.Config.Name),
-		MaxKeys: aws.Int32(1),
-	})
-
-	bucket.mu.Lock()
-	bucket.Available = err == nil
-	bucket.LastChecked = time.Now()
-	bucket.mu.Unlock()
-
-	// 更新指标
-	if m.metrics != nil {
-		m.metrics.SetBucketHealthy(bucket.Config.Name, bucket.Config.Endpoint, bucket.Available)
-	}
-}
-
-// updateAllStats 更新所有存储桶的统计信息
-func (m *Manager) updateAllStats(ctx context.Context) {
-	m.mu.RLock()
-	buckets := make([]*BucketInfo, 0, len(m.buckets))
-	for _, b := range m.buckets {
-		buckets = append(buckets, b)
-	}
-	m.mu.RUnlock()
-
-	var wg sync.WaitGroup
-	for _, bucket := range buckets {
-		wg.Add(1)
-		go func(b *BucketInfo) {
-			defer wg.Done()
-			m.updateBucketStats(ctx, b)
-		}(bucket)
-	}
-	wg.Wait()
-}
-
-// updateBucketStats 更新单个存储桶的统计信息
-func (m *Manager) updateBucketStats(ctx context.Context, bucket *BucketInfo) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
-	var totalSize int64
-	var continuationToken *string
-
-	for {
-		output, err := bucket.Client.ListObjectsV2(ctx, &s3.ListObjectsV2Input{
-			Bucket:            aws.String(bucket.Config.Name),
-			ContinuationToken: continuationToken,
-		})
-		if err != nil {
-			break
-		}
-
-		for _, obj := range output.Contents {
-			if obj.Size != nil {
-				totalSize += *obj.Size
-			}
-		}
-
-		if output.IsTruncated == nil || !*output.IsTruncated {
-			break
-		}
-		continuationToken = output.NextContinuationToken
-	}
-
-	bucket.mu.Lock()
-	bucket.UsedSize = totalSize
-	bucket.mu.Unlock()
-
-	// 更新指标
-	if m.metrics != nil {
-		m.metrics.SetBucketUsage(bucket.Config.Name, totalSize, bucket.Config.MaxSizeBytes)
+	
+	// 停止统计监控
+	if m.statsMonitor != nil {
+		m.statsMonitor.Stop()
 	}
 }
 
