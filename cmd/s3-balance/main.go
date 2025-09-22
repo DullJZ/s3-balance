@@ -85,6 +85,7 @@ func main() {
 		cfg.S3API.AccessKey,
 		cfg.S3API.SecretKey,
 		metricsService,
+		cfg.S3API.ProxyMode,
 	)
 
 	// 设置路由

@@ -138,9 +138,9 @@ s3api:
   virtual_host: false
   
   # 工作模式：
-  # false (默认)：预签名重定向模式，客户端直接与后端存储交互
-  # true：代理模式，数据通过S3 Balance服务器传输
-  proxy_mode: false
+  # false：预签名重定向模式，客户端直接与后端存储交互
+  # true (默认)：代理模式，数据通过S3 Balance服务器传输
+  proxy_mode: true
   
   # 是否需要认证（开发环境可设为false）
   auth_required: false

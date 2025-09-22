@@ -18,6 +18,7 @@ type S3Handler struct {
 	accessKey     string
 	secretKey     string
 	metrics       *metrics.Metrics
+	proxyMode     bool
 }
 
 // NewS3Handler 创建新的S3兼容API处理器
@@ -29,6 +30,7 @@ func NewS3Handler(
 	accessKey string,
 	secretKey string,
 	metrics *metrics.Metrics,
+	proxyMode bool,
 ) *S3Handler {
 	return &S3Handler{
 		bucketManager: bucketManager,
@@ -38,6 +40,7 @@ func NewS3Handler(
 		accessKey:     accessKey,
 		secretKey:     secretKey,
 		metrics:       metrics,
+		proxyMode:     proxyMode,
 	}
 }
 

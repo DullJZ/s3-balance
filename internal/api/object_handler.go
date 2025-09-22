@@ -82,9 +82,9 @@ func (h *S3Handler) handleGetObject(w http.ResponseWriter, r *http.Request, buck
 		return
 	}
 
-	// 默认使用预签名重定向模式，只有明确指定时才使用代理模式
-	if r.URL.Query().Get("proxy") == "true" {
-		// 代理模式：服务器下载内容并返回给客户端
+	// 根据配置决定使用代理模式还是重定向模式
+	if h.proxyMode {
+		// 代理模式：流式传输内容给客户端
 		resp, err := http.Get(downloadInfo.URL)
 		if err != nil {
 			h.sendS3Error(w, "InternalError", "Failed to fetch object", key)
@@ -92,13 +92,38 @@ func (h *S3Handler) handleGetObject(w http.ResponseWriter, r *http.Request, buck
 		}
 		defer resp.Body.Close()
 
-		// 复制响应头
-		for k, v := range resp.Header {
-			w.Header()[k] = v
+		// 检查响应状态
+		if resp.StatusCode != http.StatusOK {
+			w.WriteHeader(resp.StatusCode)
+			io.Copy(w, resp.Body)
+			return
 		}
 
-		// 复制响应体
-		io.Copy(w, resp.Body)
+		// 复制重要的响应头
+		if contentType := resp.Header.Get("Content-Type"); contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		if contentLength := resp.Header.Get("Content-Length"); contentLength != "" {
+			w.Header().Set("Content-Length", contentLength)
+		}
+		if lastModified := resp.Header.Get("Last-Modified"); lastModified != "" {
+			w.Header().Set("Last-Modified", lastModified)
+		}
+		if etag := resp.Header.Get("ETag"); etag != "" {
+			w.Header().Set("ETag", etag)
+		}
+		if contentEncoding := resp.Header.Get("Content-Encoding"); contentEncoding != "" {
+			w.Header().Set("Content-Encoding", contentEncoding)
+		}
+		if cacheControl := resp.Header.Get("Cache-Control"); cacheControl != "" {
+			w.Header().Set("Cache-Control", cacheControl)
+		}
+
+		// 流式复制响应体
+		_, err = io.Copy(w, resp.Body)
+		if err != nil {
+			log.Printf("Error streaming response body for key %s: %v", key, err)
+		}
 	} else {
 		// 重定向模式：返回302重定向到预签名URL（默认）
 		http.Redirect(w, r, downloadInfo.URL, http.StatusFound)
