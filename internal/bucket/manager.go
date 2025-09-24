@@ -3,6 +3,7 @@ package bucket
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
@@ -280,7 +281,7 @@ func (m *Manager) GetVirtualBuckets() []*BucketInfo {
 func (m *Manager) GetRealBuckets() []*BucketInfo {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	
+
 	var real []*BucketInfo
 	for _, b := range m.buckets {
 		if !b.IsVirtual() {
@@ -288,4 +289,102 @@ func (m *Manager) GetRealBuckets() []*BucketInfo {
 		}
 	}
 	return real
+}
+
+// UpdateConfig 更新配置（支持热更新）
+func (m *Manager) UpdateConfig(newConfig *config.Config) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	log.Println("Updating bucket manager configuration...")
+
+	// 更新配置引用
+	oldConfig := m.config
+	m.config = newConfig
+
+	// 检查是否需要重新创建存储桶
+	needsRestart := m.checkIfRestartNeeded(oldConfig, newConfig)
+	if needsRestart {
+		log.Println("Bucket configuration changed significantly, recreating buckets...")
+
+		// 停止现有的监控
+		if m.healthMonitor != nil {
+			m.healthMonitor.Stop()
+		}
+		if m.statsMonitor != nil {
+			m.statsMonitor.Stop()
+		}
+
+		// 重新创建bucket映射
+		m.buckets = make(map[string]*BucketInfo)
+
+		// 初始化所有存储桶客户端
+		for _, bucketCfg := range newConfig.Buckets {
+			if !bucketCfg.Enabled {
+				continue
+			}
+
+			client, err := createS3Client(bucketCfg)
+			if err != nil {
+				// 如果创建失败，恢复旧配置
+				m.config = oldConfig
+				return fmt.Errorf("failed to create S3 client for bucket %s: %v", bucketCfg.Name, err)
+			}
+
+			info := &BucketInfo{
+				Config:      bucketCfg,
+				Client:      client,
+				Available:   true,
+				LastChecked: time.Now(),
+			}
+
+			m.buckets[bucketCfg.Name] = info
+		}
+
+		// 重新初始化监控
+		m.initHealthMonitoring()
+	} else {
+		// 只更新监控间隔（需要重启监控来改变间隔）
+		log.Println("Updating monitoring intervals...")
+		if m.healthMonitor != nil {
+			m.healthMonitor.Stop()
+		}
+		if m.statsMonitor != nil {
+			m.statsMonitor.Stop()
+		}
+		// 重新初始化监控以应用新的间隔
+		m.initHealthMonitoring()
+	}
+
+	log.Println("Bucket manager configuration updated successfully")
+	return nil
+}
+
+// checkIfRestartNeeded 检查是否需要重启bucket manager
+func (m *Manager) checkIfRestartNeeded(oldConfig, newConfig *config.Config) bool {
+	// 检查bucket数量变化
+	if len(oldConfig.Buckets) != len(newConfig.Buckets) {
+		return true
+	}
+
+	// 检查bucket配置变化
+	for i, oldBucket := range oldConfig.Buckets {
+		if i >= len(newConfig.Buckets) {
+			return true
+		}
+		newBucket := newConfig.Buckets[i]
+
+		// 检查关键配置项
+		if oldBucket.Name != newBucket.Name ||
+		   oldBucket.Endpoint != newBucket.Endpoint ||
+		   oldBucket.AccessKeyID != newBucket.AccessKeyID ||
+		   oldBucket.SecretAccessKey != newBucket.SecretAccessKey ||
+		   oldBucket.Region != newBucket.Region ||
+		   oldBucket.Enabled != newBucket.Enabled ||
+		   oldBucket.Virtual != newBucket.Virtual {
+			return true
+		}
+	}
+
+	return false
 }

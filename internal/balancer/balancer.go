@@ -87,7 +87,7 @@ func (b *Balancer) GetStrategy() string {
 // 允许在运行时更改负载均衡策略
 func (b *Balancer) SetStrategy(strategyName string) error {
 	var strategy Strategy
-	
+
 	switch strategyName {
 	case "round-robin":
 		strategy = NewRoundRobinStrategy()
@@ -100,9 +100,14 @@ func (b *Balancer) SetStrategy(strategyName string) error {
 	default:
 		return fmt.Errorf("unknown balancer strategy: %s", strategyName)
 	}
-	
+
 	b.strategy = strategy
 	return nil
+}
+
+// UpdateStrategy 更新负载均衡策略（热更新用）
+func (b *Balancer) UpdateStrategy(strategyName string) error {
+	return b.SetStrategy(strategyName)
 }
 
 // SetMetrics 设置指标服务

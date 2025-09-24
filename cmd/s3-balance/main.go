@@ -29,11 +29,15 @@ func main() {
 	flag.StringVar(&configFile, "config", "config/config.yaml", "Path to configuration file")
 	flag.Parse()
 
-	// 加载配置
-	cfg, err := config.Load(configFile)
+	// 创建配置管理器
+	configManager, err := config.NewManager(configFile)
 	if err != nil {
-		log.Fatalf("Failed to load configuration: %v", err)
+		log.Fatalf("Failed to create config manager: %v", err)
 	}
+	defer configManager.Close()
+
+	// 获取初始配置
+	cfg := configManager.GetConfig()
 
 	// 初始化数据库
 	if err := database.Initialize(&cfg.Database); err != nil {
@@ -87,6 +91,23 @@ func main() {
 		metricsService,
 		cfg.S3API.ProxyMode,
 	)
+
+	// 注册配置热更新回调
+	configManager.OnConfigChange(func(newConfig *config.Config) {
+		log.Println("Configuration changed, updating components...")
+
+		// 更新bucket manager配置
+		if err := bucketManager.UpdateConfig(newConfig); err != nil {
+			log.Printf("Failed to update bucket manager config: %v", err)
+		}
+
+		// 更新负载均衡器配置
+		if err := lb.UpdateStrategy(newConfig.Balancer.Strategy); err != nil {
+			log.Printf("Failed to update load balancer strategy: %v", err)
+		}
+
+		log.Println("Components updated successfully")
+	})
 
 	// 设置路由
 	router := mux.NewRouter()
