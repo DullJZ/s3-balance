@@ -46,7 +46,6 @@ buckets:
     max_size: "100GB"  # 最大容量限制
     weight: 10  # 权重（用于加权负载均衡）
     enabled: true
-    use_ssl: true
     path_style: false  # AWS S3使用虚拟主机风格
     virtual: false  # 这是真实存储桶
 
@@ -59,7 +58,6 @@ buckets:
     max_size: "50GB"
     weight: 5
     enabled: true
-    use_ssl: false
     path_style: true  # MinIO通常使用路径风格
     virtual: false  # 这是真实存储桶
 
@@ -72,7 +70,6 @@ buckets:
     max_size: "100GB"  # 显示的最大容量
     weight: 10  # 权重（用于在真实存储桶间负载均衡）
     enabled: true
-    use_ssl: true
     path_style: false
     virtual: true  # 这是虚拟存储桶
 
@@ -85,7 +82,6 @@ buckets:
     max_size: "50GB"
     weight: 10
     enabled: true
-    use_ssl: true
     path_style: false
     virtual: true  # 这是虚拟存储桶
 
@@ -98,7 +94,6 @@ buckets:
     max_size: "200GB"
     weight: 15
     enabled: true
-    use_ssl: true
     path_style: false
     virtual: false  # 这是真实存储桶
 
