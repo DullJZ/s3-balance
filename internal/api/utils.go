@@ -4,9 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"net/http"
-	"net/url"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/DullJZ/s3-balance/internal/storage"
@@ -65,30 +63,4 @@ func (h *S3Handler) setObjectHeaders(w http.ResponseWriter, obj *storage.Object)
 	} else {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
-}
-
-
-// 辅助函数：解析S3路径
-func parseS3Path(requestPath string) (bucket string, key string) {
-	requestPath = strings.TrimPrefix(requestPath, "/")
-	parts := strings.SplitN(requestPath, "/", 2)
-
-	if len(parts) > 0 {
-		bucket = parts[0]
-	}
-	if len(parts) > 1 {
-		key = parts[1]
-	}
-
-	return bucket, key
-}
-
-// 辅助函数：URL编码/解码
-func urlEncodePath(p string) string {
-	return strings.ReplaceAll(url.QueryEscape(p), "+", "%20")
-}
-
-func urlDecodePath(p string) string {
-	decoded, _ := url.QueryUnescape(p)
-	return decoded
 }

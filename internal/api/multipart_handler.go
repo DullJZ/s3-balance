@@ -127,7 +127,7 @@ func (h *S3Handler) handleUploadPart(w http.ResponseWriter, r *http.Request) {
 		if etag != "" {
 			w.Header().Set("ETag", etag)
 		}
-		
+
 		// 更新上传会话的分片数
 		session, err := h.storage.GetUploadSession(uploadID)
 		if err != nil {
@@ -138,7 +138,7 @@ func (h *S3Handler) handleUploadPart(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Failed to update upload session for uploadID %s: %v", uploadID, err)
 			}
 		}
-		
+
 		w.WriteHeader(http.StatusOK)
 	} else {
 		// 读取错误响应体以获取详细信息
@@ -294,7 +294,7 @@ func (h *S3Handler) handleListMultipartUploads(w http.ResponseWriter, r *http.Re
 				sessions = sessions[:maxUploads]
 				isTruncated = true
 			}
-			
+
 			// 转换会话为Upload格式
 			for _, session := range sessions {
 				allUploads = append(allUploads, Upload{
@@ -321,13 +321,13 @@ func (h *S3Handler) handleListMultipartUploads(w http.ResponseWriter, r *http.Re
 
 	// 构建响应
 	result := ListMultipartUploadsResult{
-		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
-		Bucket:      bucketName,
-		KeyMarker:   keyMarker,
+		Xmlns:          "http://s3.amazonaws.com/doc/2006-03-01/",
+		Bucket:         bucketName,
+		KeyMarker:      keyMarker,
 		UploadIdMarker: uploadIdMarker,
-		MaxUploads:  maxUploads,
-		IsTruncated: isTruncated,
-		Uploads:     allUploads,
+		MaxUploads:     maxUploads,
+		IsTruncated:    isTruncated,
+		Uploads:        allUploads,
 	}
 
 	// 如果有更多结果，设置下一个标记
@@ -510,7 +510,7 @@ func (h *S3Handler) handleCompleteMultipartUpload(w http.ResponseWriter, r *http
 		return
 	}
 
-	log.Printf("CompleteMultipartUpload request - Bucket: %s, Key: %s, UploadID: %s, Parts: %d", 
+	log.Printf("CompleteMultipartUpload request - Bucket: %s, Key: %s, UploadID: %s, Parts: %d",
 		bucketName, key, uploadID, len(completeReq.Parts))
 	for i, part := range completeReq.Parts {
 		log.Printf("  Part %d: PartNumber=%d, ETag=%s", i+1, part.PartNumber, part.ETag)
@@ -544,7 +544,7 @@ func (h *S3Handler) handleCompleteMultipartUpload(w http.ResponseWriter, r *http
 	result := CompleteMultipartUploadResult{
 		Xmlns:    "http://s3.amazonaws.com/doc/2006-03-01/",
 		Location: "/" + bucketName + "/" + key, // 返回虚拟存储桶路径
-		Bucket:   bucketName, // 返回虚拟存储桶名称
+		Bucket:   bucketName,                   // 返回虚拟存储桶名称
 		Key:      key,
 		ETag:     *completeResp.ETag,
 	}
@@ -565,7 +565,7 @@ func (h *S3Handler) handleCompleteMultipartUpload(w http.ResponseWriter, r *http
 
 	// 记录对象元数据（使用实际大小）
 	h.storage.RecordObject(key, targetBucket.Config.Name, objectSize, nil)
-	
+
 	// 更新存储桶使用量
 	if objectSize > 0 {
 		targetBucket.UpdateUsedSize(objectSize)

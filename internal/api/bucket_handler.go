@@ -109,14 +109,14 @@ func (h *S3Handler) handleListObjectsForVirtualBucket(w http.ResponseWriter, r *
 	}
 
 	result := ListBucketResult{
-		Xmlns:       "http://s3.amazonaws.com/doc/2006-03-01/",
-		Name:        bucketName,
-		Prefix:      prefix,
-		Marker:      marker,
-		MaxKeys:     maxKeys,
-		Delimiter:   delimiter,
-		IsTruncated: false,
-		Contents:    make([]ObjectInfo, 0, len(objects)),
+		Xmlns:          "http://s3.amazonaws.com/doc/2006-03-01/",
+		Name:           bucketName,
+		Prefix:         prefix,
+		Marker:         marker,
+		MaxKeys:        maxKeys,
+		Delimiter:      delimiter,
+		IsTruncated:    false,
+		Contents:       make([]ObjectInfo, 0, len(objects)),
 		CommonPrefixes: make([]CommonPrefix, 0),
 	}
 
