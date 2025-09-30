@@ -1,8 +1,11 @@
 package api
 
 import (
+	"sync/atomic"
+
 	"github.com/DullJZ/s3-balance/internal/balancer"
 	"github.com/DullJZ/s3-balance/internal/bucket"
+	"github.com/DullJZ/s3-balance/internal/config"
 	"github.com/DullJZ/s3-balance/internal/metrics"
 	"github.com/DullJZ/s3-balance/internal/middleware"
 	"github.com/DullJZ/s3-balance/internal/storage"
@@ -16,12 +19,16 @@ type S3Handler struct {
 	balancer      *balancer.Balancer
 	presigner     *presigner.Presigner
 	storage       *storage.Service
-	accessKey     string
-	secretKey     string
 	metrics       *metrics.Metrics
-	proxyMode     bool
-	authRequired  bool
-	virtualHost   bool
+	settings      atomic.Value
+}
+
+type handlerSettings struct {
+	accessKey    string
+	secretKey    string
+	proxyMode    bool
+	authRequired bool
+	virtualHost  bool
 }
 
 // NewS3Handler 创建新的S3兼容API处理器
@@ -36,19 +43,27 @@ func NewS3Handler(
 	proxyMode bool,
 	authRequired bool,
 	virtualHost bool,
+
 ) *S3Handler {
-	return &S3Handler{
+	handler := &S3Handler{
 		bucketManager: bucketManager,
 		balancer:      balancer,
 		presigner:     presigner,
 		storage:       storage,
-		accessKey:     accessKey,
-		secretKey:     secretKey,
 		metrics:       metrics,
-		proxyMode:     proxyMode,
-		authRequired:  authRequired,
-		virtualHost:   virtualHost,
 	}
+	handler.initSettings(accessKey, secretKey, proxyMode, authRequired, virtualHost)
+	return handler
+}
+
+func (h *S3Handler) initSettings(accessKey, secretKey string, proxyMode, authRequired, virtualHost bool) {
+	h.settings.Store(handlerSettings{
+		accessKey:    accessKey,
+		secretKey:    secretKey,
+		proxyMode:    proxyMode,
+		authRequired: authRequired,
+		virtualHost:  virtualHost,
+	})
 }
 
 // RegisterS3Routes 注册S3兼容的路由
@@ -78,16 +93,52 @@ func (h *S3Handler) RegisterS3Routes(router *mux.Router) {
 
 	// 添加中间件
 	router.Use(middleware.VirtualHost(middleware.VirtualHostConfig{
-		Enabled: h.virtualHost,
+		Enabled: h.virtualHostEnabled,
 		BucketExists: func(name string) bool {
 			_, ok := h.bucketManager.GetBucket(name)
 			return ok
 		},
 	}))
 	router.Use(middleware.BasicAuth(middleware.AuthConfig{
-		Required:  h.authRequired,
-		AccessKey: h.accessKey,
-		SecretKey: h.secretKey,
-		OnError:   h.sendS3Error,
+		Required:    h.authRequired,
+		Credentials: h.credentials,
+		OnError:     h.sendS3Error,
 	}))
+}
+
+func (h *S3Handler) loadSettings() handlerSettings {
+	if v := h.settings.Load(); v != nil {
+		return v.(handlerSettings)
+	}
+	return handlerSettings{}
+}
+
+func (h *S3Handler) virtualHostEnabled() bool {
+	return h.loadSettings().virtualHost
+}
+
+func (h *S3Handler) authRequired() bool {
+	return h.loadSettings().authRequired
+}
+
+func (h *S3Handler) credentials() (string, string) {
+	s := h.loadSettings()
+	return s.accessKey, s.secretKey
+}
+
+func (h *S3Handler) proxyModeEnabled() bool {
+	return h.loadSettings().proxyMode
+}
+
+func (h *S3Handler) UpdateS3APIConfig(cfg *config.S3APIConfig) {
+	if cfg == nil {
+		return
+	}
+	h.settings.Store(handlerSettings{
+		accessKey:    cfg.AccessKey,
+		secretKey:    cfg.SecretKey,
+		proxyMode:    cfg.ProxyMode,
+		authRequired: cfg.AuthRequired,
+		virtualHost:  cfg.VirtualHost,
+	})
 }

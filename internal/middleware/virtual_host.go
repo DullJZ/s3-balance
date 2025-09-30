@@ -8,7 +8,7 @@ import (
 
 // VirtualHostConfig controls host-style bucket resolution.
 type VirtualHostConfig struct {
-	Enabled      bool
+	Enabled      func() bool
 	BucketExists func(string) bool
 }
 
@@ -16,7 +16,11 @@ type VirtualHostConfig struct {
 func VirtualHost(cfg VirtualHostConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !cfg.Enabled {
+			enabled := false
+			if cfg.Enabled != nil {
+				enabled = cfg.Enabled()
+			}
+			if !enabled {
 				next.ServeHTTP(w, r)
 				return
 			}

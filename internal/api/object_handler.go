@@ -84,7 +84,7 @@ func (h *S3Handler) handleGetObject(w http.ResponseWriter, r *http.Request, buck
 	}
 
 	// 根据配置决定使用代理模式还是重定向模式
-	if h.proxyMode {
+	if h.proxyModeEnabled() {
 		// 代理模式：流式传输内容给客户端
 		resp, err := http.Get(downloadInfo.URL)
 		if err != nil {

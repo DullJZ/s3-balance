@@ -108,6 +108,9 @@ func main() {
 			log.Printf("Failed to update load balancer strategy: %v", err)
 		}
 
+		// 更新S3 API设置
+		s3Handler.UpdateS3APIConfig(&newConfig.S3API)
+
 		log.Println("Components updated successfully")
 	})
 
@@ -254,7 +257,7 @@ func startSessionCleaner(ctx context.Context, storageService *storage.Service) {
 }
 
 // cleanupS3MultipartUploads 清理S3存储桶中过期的分片上传
-func cleanupS3MultipartUploads(ctx context.Context, storageService *storage.Service) {
+func cleanupS3MultipartUploads(_ context.Context, storageService *storage.Service) {
 	// 获取所有过期的会话
 	sessions, err := storageService.GetPendingUploadSessions("", "", "", 0)
 	if err != nil {

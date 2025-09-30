@@ -8,17 +8,20 @@ import (
 
 // AuthConfig controls Basic Auth validation.
 type AuthConfig struct {
-	Required  bool
-	AccessKey string
-	SecretKey string
-	OnError   func(http.ResponseWriter, string, string, string)
+	Required    func() bool
+	Credentials func() (string, string)
+	OnError     func(http.ResponseWriter, string, string, string)
 }
 
-// BasicAuth enforces static access/secret key authentication when Required is true.
+// BasicAuth enforces static access/secret key authentication when required.
 func BasicAuth(cfg AuthConfig) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !cfg.Required {
+			required := false
+			if cfg.Required != nil {
+				required = cfg.Required()
+			}
+			if !required {
 				next.ServeHTTP(w, r)
 				return
 			}
@@ -42,11 +45,16 @@ func BasicAuth(cfg AuthConfig) func(http.Handler) http.Handler {
 				return
 			}
 
-			if parts[0] != cfg.AccessKey {
+			accessKey, secretKey := "", ""
+			if cfg.Credentials != nil {
+				accessKey, secretKey = cfg.Credentials()
+			}
+
+			if parts[0] != accessKey {
 				invokeOnError(w, cfg, "InvalidAccessKeyId", "The AWS Access Key Id you provided does not match the configured key.")
 				return
 			}
-			if parts[1] != cfg.SecretKey {
+			if parts[1] != secretKey {
 				invokeOnError(w, cfg, "SignatureDoesNotMatch", "The request signature we calculated does not match the signature you provided.")
 				return
 			}
