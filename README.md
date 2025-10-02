@@ -13,7 +13,58 @@ S3 Balance 是一个用 Go 编写的 S3 兼容负载均衡器，可在多套对�
 
 ## 快速开始
 
+### Docker Compose
+
+#### 仅S3 Balance服务
+
+```yaml
+services:
+  s3-balance:
+    image: dulljz/s3-balance:latest
+    container_name: s3-balance
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/app/config/config.yaml
+      - ./data:/app/data
+    environment:
+      - TZ=Asia/Shanghai
+    restart: unless-stopped
+    command: ["/app/s3-balance", "-config", "/app/config/config.yaml"]
+```
+#### 含Prometheus & Grafana监控
+
 ```bash
+# 克隆仓库
+git clone https://github.com/DullJZ/s3-balance.git --depth=1
+cd s3-balance/deploy/docker
+
+# 修改配置
+vim config.yaml
+
+# 启动服务
+docker compose up -d
+```
+
+### Docker
+```bash
+# 拉取镜像
+docker pull dulljz/s3-balance:latest
+# 准备配置与数据目录
+mkdir -p ~/s3-balance/config ~/s3-balance/data
+wget https://raw.githubusercontent.com/DullJZ/s3-balance/refs/heads/main/config/config.example.yaml -O ~/s3-balance/config/config.yaml
+vim ~/s3-balance/config/config.yaml   # 设置后端桶、数据库、S3 API 选项
+# 运行
+docker run -d --name s3-balance -p 8080:8080 -v ~/s3-balance/config:/app/config -v ~/s3-balance/data:/app/data dulljz/s3-balance:latest
+```
+
+### 本地编译运行
+
+```bash
+# 克隆仓库
+git clone https://github.com/DullJZ/s3-balance.git --depth=1
+cd s3-balance
+
 # 安装依赖
 go mod tidy
 
@@ -27,10 +78,6 @@ go run cmd/s3-balance/main.go -config config/config.yaml
 go build -o s3-balance cmd/s3-balance/main.go
 ./s3-balance -config config/config.yaml
 
-# Docker 构建
-
-docker build -t s3-balance .
-docker run -p 8080:8080 -v $(pwd)/config:/root/config s3-balance
 ```
 
 ## 配置要点
@@ -46,7 +93,6 @@ docker run -p 8080:8080 -v $(pwd)/config:/root/config s3-balance
 
 - 默认监听 `http://localhost:8080`，支持 `GET /health` 健康检查、`GET /metrics` 指标。
 - 可使用 AWS CLI、s3cmd、MinIO Client 或 `python3 test_virtual_bucket_s3.py` 验证兼容性；脚本运行前需修改 endpoint 与凭据。
-- Go 单元测试：`go test ./...`。
 
 ## 项目结构
 
