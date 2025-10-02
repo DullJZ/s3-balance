@@ -9,7 +9,7 @@ S3 Balance 是一个用 Go 编写的 S3 兼容负载均衡器，可在多套对�
 - **健康监控**：周期性探活与容量统计，Prometheus 指标暴露在 `/metrics`。
 - **虚拟桶映射**：对外只暴露虚拟桶名称，真实桶在后端透明调度。
 - **代理或重定向模式**：可选择由服务转发数据，或返回预签名 URL 让客户端直连。
-- **Basic Auth**：配置 `s3api.auth_required` 后启用基础认证，与 `access_key/secret_key` 对应。
+- **SigV4 认证**：配置 `s3api.auth_required` 后，通过 `github.com/DullJZ/s3-validate` 校验 AWS Signature Version 4 请求。
 
 ## 快速开始
 
@@ -40,7 +40,7 @@ docker run -p 8080:8080 -v $(pwd)/config:/root/config s3-balance
 - `buckets`：列出真实与虚拟桶。`virtual: true` 的条目会对外暴露，真实桶为 `virtual: false`。可设置 `path_style` 与 `max_size`。
 - `balancer`：策略 (`round-robin`|`least-space`|`weighted`)、健康检查周期、重试次数与延迟。
 - `metrics`：是否启用 Prometheus 指标及路径。
-- `s3api`：Access/Secret Key、`proxy_mode`（true=服务代理，false=重定向）、`auth_required`（Basic Auth）、`virtual_host`（Host-style 路由）。
+- `s3api`：Access/Secret Key、`proxy_mode`（true=服务代理，false=重定向）、`auth_required`（SigV4 校验）、`virtual_host`（Host-style 路由）。
 
 ## API & 测试
 
@@ -51,13 +51,13 @@ docker run -p 8080:8080 -v $(pwd)/config:/root/config s3-balance
 ## 项目结构
 
 ```
-cmd/s3-balance/     # 服务入口
-internal/api/       # S3 路由、对象/分片处理
-internal/bucket/    # 桶客户端 & 健康监控
-internal/balancer/  # 策略实现与指标
-internal/middleware/# 共用中间件（BasicAuth、VirtualHost）
-internal/storage/   # GORM 模型与服务
-pkg/presigner/      # 预签名 URL 工具
-config/             # 示例配置与部署清单
-deploy/             # Docker/Kubernetes/Helm 清单
+cmd/s3-balance/      # 服务入口
+internal/api/        # S3 路由、对象/分片处理
+internal/bucket/     # 桶客户端 & 健康监控
+internal/balancer/   # 策略实现与指标
+internal/middleware/ # SigV4、虚拟主机等中间件
+internal/storage/    # GORM 模型与服务
+pkg/presigner/       # 预签名 URL 工具
+config/              # 示例配置与部署清单
+deploy/              # Docker/Kubernetes/Helm 清单
 ```
