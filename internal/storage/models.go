@@ -10,16 +10,16 @@ import (
 
 // Object 对象信息模型
 type Object struct {
-	ID         uint           `gorm:"primaryKey" json:"id"`
-	Key        string         `gorm:"size:512;not null" json:"key"`
-	BucketName string         `gorm:"index;size:255;not null" json:"bucket_name"`
-	Size       int64          `gorm:"not null;default:0" json:"size"`
-	Metadata   JSON           `gorm:"type:json" json:"metadata,omitempty"`
-	ContentType string        `gorm:"size:128" json:"content_type,omitempty"`
-	ETag       string         `gorm:"size:128" json:"etag,omitempty"`
-	CreatedAt  time.Time      `json:"created_at"`
-	UpdatedAt  time.Time      `json:"updated_at"`
-	DeletedAt  gorm.DeletedAt `gorm:"index" json:"-"`
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	Key         string         `gorm:"size:512;not null" json:"key"`
+	BucketName  string         `gorm:"index;size:255;not null" json:"bucket_name"`
+	Size        int64          `gorm:"not null;default:0" json:"size"`
+	Metadata    JSON           `gorm:"type:json" json:"metadata,omitempty"`
+	ContentType string         `gorm:"size:128" json:"content_type,omitempty"`
+	ETag        string         `gorm:"size:128" json:"etag,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }
 
 // TableName 指定表名
@@ -45,12 +45,12 @@ func (BucketStats) TableName() string {
 
 // VirtualBucketMapping 虚拟存储桶文件级映射模型
 type VirtualBucketMapping struct {
-	ID               uint      `gorm:"primaryKey" json:"id"`
+	ID                uint      `gorm:"primaryKey" json:"id"`
 	VirtualBucketName string    `gorm:"index;size:255;not null" json:"virtual_bucket_name"`
-	ObjectKey        string    `gorm:"index;size:512;not null" json:"object_key"`
-	RealBucketName   string    `gorm:"index;size:255;not null" json:"real_bucket_name"`
-	CreatedAt        time.Time `gorm:"not null" json:"created_at"`
-	UpdatedAt        time.Time `gorm:"not null" json:"updated_at"`
+	ObjectKey         string    `gorm:"index;size:512;not null" json:"object_key"`
+	RealBucketName    string    `gorm:"index;size:255;not null" json:"real_bucket_name"`
+	CreatedAt         time.Time `gorm:"not null" json:"created_at"`
+	UpdatedAt         time.Time `gorm:"not null" json:"updated_at"`
 }
 
 // TableName 指定表名
@@ -64,7 +64,6 @@ type UploadSession struct {
 	UploadID       string         `gorm:"uniqueIndex;size:512;not null" json:"upload_id"` // 增加到512字符以支持长uploadID
 	Key            string         `gorm:"index;size:512;not null" json:"key"`
 	BucketName     string         `gorm:"index;size:255;not null" json:"bucket_name"`
-	TotalParts     int            `gorm:"not null;default:0" json:"total_parts"`
 	CompletedParts int            `gorm:"not null;default:0" json:"completed_parts"`
 	Size           int64          `gorm:"not null;default:0" json:"size"`
 	Status         string         `gorm:"size:32;not null;default:'pending'" json:"status"` // pending, completed, aborted
@@ -81,17 +80,17 @@ func (UploadSession) TableName() string {
 
 // AccessLog 访问日志模型
 type AccessLog struct {
-	ID          uint      `gorm:"primaryKey" json:"id"`
-	Action      string    `gorm:"index;size:32;not null" json:"action"` // upload, download, delete
-	Key         string    `gorm:"index;size:512;not null" json:"key"`
-	BucketName  string    `gorm:"index;size:255" json:"bucket_name"`
-	Size        int64     `gorm:"default:0" json:"size"`
-	ClientIP    string    `gorm:"size:64" json:"client_ip"`
-	UserAgent   string    `gorm:"size:512" json:"user_agent"`
-	Success     bool      `gorm:"default:true" json:"success"`
-	ErrorMsg    string    `gorm:"type:text" json:"error_msg,omitempty"`
-	ResponseTime int64    `gorm:"default:0" json:"response_time"` // 响应时间（毫秒）
-	CreatedAt   time.Time `gorm:"index" json:"created_at"`
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	Action       string    `gorm:"index;size:32;not null" json:"action"` // upload, download, delete
+	Key          string    `gorm:"index;size:512;not null" json:"key"`
+	BucketName   string    `gorm:"index;size:255" json:"bucket_name"`
+	Size         int64     `gorm:"default:0" json:"size"`
+	ClientIP     string    `gorm:"size:64" json:"client_ip"`
+	UserAgent    string    `gorm:"size:512" json:"user_agent"`
+	Success      bool      `gorm:"default:true" json:"success"`
+	ErrorMsg     string    `gorm:"type:text" json:"error_msg,omitempty"`
+	ResponseTime int64     `gorm:"default:0" json:"response_time"` // 响应时间（毫秒）
+	CreatedAt    time.Time `gorm:"index" json:"created_at"`
 }
 
 // TableName 指定表名
@@ -116,7 +115,7 @@ func (j *JSON) Scan(value interface{}) error {
 		*j = make(map[string]interface{})
 		return nil
 	}
-	
+
 	var data []byte
 	switch v := value.(type) {
 	case []byte:
@@ -126,7 +125,7 @@ func (j *JSON) Scan(value interface{}) error {
 	default:
 		data = []byte("{}")
 	}
-	
+
 	return json.Unmarshal(data, j)
 }
 

@@ -76,6 +76,28 @@ func (h *S3Handler) handleUploadPart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 检查当前已上传大小 + 本次分片大小是否超过bucket剩余空间
+	currentSize, err := h.storage.GetUploadSessionSize(uploadID)
+	if err != nil {
+		log.Printf("Warning: failed to get upload session size for uploadID %s: %v", uploadID, err)
+		// 继续处理，不阻止上传
+		currentSize = 0
+	}
+
+	projectedSize := currentSize + contentLength
+	availableSpace := targetBucket.GetAvailableSpace()
+	if projectedSize > availableSpace {
+		// 空间不足，自动中止后端分片上传
+		log.Printf("Upload would exceed bucket capacity for key %s, aborting multipart upload. Current: %d bytes, Part: %d bytes, Available: %d bytes",
+			key, currentSize, contentLength, availableSpace)
+		h.abortMultipartUploadInternal(targetBucket, key, uploadID)
+
+		h.sendS3Error(w, "EntityTooLarge",
+			fmt.Sprintf("Upload would exceed bucket capacity. Current: %d bytes, Part: %d bytes, Available: %d bytes",
+				currentSize, contentLength, availableSpace), key)
+		return
+	}
+
 	// 转换partNumber为整数
 	partNum, err := strconv.Atoi(partNumber)
 	if err != nil {
@@ -131,7 +153,7 @@ func (h *S3Handler) handleUploadPart(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("ETag", etag)
 		}
 
-		// 更新上传会话的分片数
+		// 更新上传会话的分片数和累积大小
 		session, err := h.storage.GetUploadSession(uploadID)
 		if err != nil {
 			log.Printf("Failed to get upload session for uploadID %s: %v", uploadID, err)
@@ -139,6 +161,10 @@ func (h *S3Handler) handleUploadPart(w http.ResponseWriter, r *http.Request) {
 			// 更新已完成的分片数
 			if err := h.storage.UpdateUploadSession(uploadID, session.CompletedParts+1, "pending"); err != nil {
 				log.Printf("Failed to update upload session for uploadID %s: %v", uploadID, err)
+			}
+			// 累加分片大小
+			if err := h.storage.IncrementUploadSessionSize(uploadID, contentLength); err != nil {
+				log.Printf("Failed to increment upload session size for uploadID %s: %v", uploadID, err)
 			}
 		}
 
@@ -201,7 +227,7 @@ func (h *S3Handler) handleMultipartUpload(w http.ResponseWriter, r *http.Request
 	uploadID := *createResp.UploadId
 
 	// 记录上传会话到数据库
-	if err := h.storage.RecordUploadSession(uploadID, key, targetBucket.Config.Name, 0, 0); err != nil {
+	if err := h.storage.RecordUploadSession(uploadID, key, targetBucket.Config.Name, 0); err != nil {
 		log.Printf("Failed to record upload session for uploadID %s: %v", uploadID, err)
 		// 不影响主流程，继续处理
 	}
@@ -519,6 +545,29 @@ func (h *S3Handler) handleCompleteMultipartUpload(w http.ResponseWriter, r *http
 		log.Printf("  Part %d: PartNumber=%d, ETag=%s", i+1, part.PartNumber, part.ETag)
 	}
 
+	// 最终检查：验证累积大小是否超过bucket可用空间
+	totalSize, err := h.storage.GetUploadSessionSize(uploadID)
+	if err != nil {
+		log.Printf("Warning: failed to get upload session size for uploadID %s: %v", uploadID, err)
+		// 继续处理，不阻止完成操作
+		totalSize = 0
+	}
+
+	if totalSize > 0 {
+		availableSpace := targetBucket.GetAvailableSpace()
+		if totalSize > availableSpace {
+			// 空间不足，自动中止后端分片上传
+			log.Printf("Upload size exceeds bucket capacity for key %s, aborting multipart upload. Total: %d bytes, Available: %d bytes",
+				key, totalSize, availableSpace)
+			h.abortMultipartUploadInternal(targetBucket, key, uploadID)
+
+			h.sendS3Error(w, "EntityTooLarge",
+				fmt.Sprintf("Upload size exceeds bucket capacity. Total: %d bytes, Available: %d bytes",
+					totalSize, availableSpace), key)
+			return
+		}
+	}
+
 	// 完成分片上传
 	ctx := context.Background()
 	sort.SliceStable(completeReq.Parts, func(i, j int) bool {
@@ -605,6 +654,28 @@ func getAPIError(err error) (smithy.APIError, bool) {
 	}
 
 	return nil, false
+}
+
+// abortMultipartUploadInternal 内部方法：向后端S3发送中止分片上传请求
+func (h *S3Handler) abortMultipartUploadInternal(targetBucket *bucket.BucketInfo, key, uploadID string) error {
+	ctx := context.Background()
+	_, err := targetBucket.Client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
+		Bucket:   aws.String(targetBucket.Config.Name),
+		Key:      aws.String(key),
+		UploadId: aws.String(uploadID),
+	})
+	if err != nil {
+		log.Printf("Failed to abort multipart upload for key %s, uploadID %s: %v", key, uploadID, err)
+		return err
+	}
+
+	// 更新上传会话状态为已中止
+	if err := h.storage.UpdateUploadSession(uploadID, 0, "aborted"); err != nil {
+		log.Printf("Failed to update upload session status to aborted for uploadID %s: %v", uploadID, err)
+	}
+
+	log.Printf("Successfully aborted multipart upload for key %s, uploadID %s", key, uploadID)
+	return nil
 }
 
 // handleAbortMultipartUpload 中止分片上传

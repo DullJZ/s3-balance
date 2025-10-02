@@ -29,13 +29,13 @@ func (s *Service) RecordObject(key, bucketName string, size int64, metadata map[
 			return fmt.Errorf("failed to permanently delete soft-deleted object: %w", err)
 		}
 	}
-	
+
 	obj := &Object{
 		Key:        key,
 		BucketName: bucketName,
 		Size:       size,
 	}
-	
+
 	if len(metadata) > 0 {
 		obj.Metadata = make(JSON)
 		for k, v := range metadata {
@@ -44,13 +44,13 @@ func (s *Service) RecordObject(key, bucketName string, size int64, metadata map[
 	} else {
 		obj.Metadata = make(JSON)
 	}
-	
+
 	// 使用 Upsert（更新或插入）
 	result := s.db.Where("`key` = ?", key).Where("`deleted_at` IS NULL").FirstOrCreate(&obj)
 	if result.Error != nil {
 		return fmt.Errorf("failed to record object: %w", result.Error)
 	}
-	
+
 	if result.RowsAffected == 0 {
 		// 对象已存在，更新它
 		updates := map[string]interface{}{
@@ -63,10 +63,10 @@ func (s *Service) RecordObject(key, bucketName string, size int64, metadata map[
 			return fmt.Errorf("failed to update object: %w", err)
 		}
 	}
-	
+
 	// 更新存储桶统计
 	s.updateBucketStats(bucketName)
-	
+
 	return nil
 }
 
@@ -103,17 +103,17 @@ func (s *Service) DeleteObject(key string) error {
 		}
 		return fmt.Errorf("failed to find object: %w", err)
 	}
-	
+
 	bucketName := obj.BucketName
-	
+
 	// 软删除
 	if err := s.db.Delete(&obj).Error; err != nil {
 		return fmt.Errorf("failed to delete object: %w", err)
 	}
-	
+
 	// 更新存储桶统计
 	s.updateBucketStats(bucketName)
-	
+
 	return nil
 }
 
@@ -121,32 +121,32 @@ func (s *Service) DeleteObject(key string) error {
 func (s *Service) ListObjects(bucketName, prefix, marker string, maxKeys int) ([]*Object, error) {
 	var objects []*Object
 	query := s.db.Model(&Object{})
-	
+
 	// 按bucket过滤
 	if bucketName != "" {
 		query = query.Where("bucket_name = ?", bucketName)
 	}
-	
+
 	// 前缀过滤
 	if prefix != "" {
 		query = query.Where("`key` LIKE ?", prefix+"%")
 	}
-	
+
 	// Marker分页
 	if marker != "" {
 		query = query.Where("`key` > ?", marker)
 	}
-	
+
 	// 限制返回数量
 	if maxKeys > 0 {
 		query = query.Limit(maxKeys)
 	}
-	
+
 	// 按key字母顺序排序（S3标准）
 	if err := query.Order("`key` ASC").Find(&objects).Error; err != nil {
 		return nil, fmt.Errorf("failed to list objects: %w", err)
 	}
-	
+
 	return objects, nil
 }
 
@@ -203,27 +203,27 @@ func (s *Service) GetBucketObjectCount(bucketName string) (int64, error) {
 // updateBucketStats 更新存储桶统计信息
 func (s *Service) updateBucketStats(bucketName string) error {
 	var stats BucketStats
-	
+
 	// 计算新的统计数据
 	var count int64
 	var totalSize int64
-	
+
 	if err := s.db.Model(&Object{}).
 		Where("bucket_name = ?", bucketName).
 		Count(&count).Error; err != nil {
 		return fmt.Errorf("failed to count objects: %w", err)
 	}
-	
+
 	if err := s.db.Model(&Object{}).
 		Where("bucket_name = ?", bucketName).
 		Select("COALESCE(SUM(size), 0)").
 		Scan(&totalSize).Error; err != nil {
 		return fmt.Errorf("failed to sum object sizes: %w", err)
 	}
-	
+
 	// 尝试查找现有记录
 	err := s.db.Where("bucket_name = ?", bucketName).First(&stats).Error
-	
+
 	if err == gorm.ErrRecordNotFound {
 		// 记录不存在，创建新记录
 		stats = BucketStats{
@@ -245,30 +245,29 @@ func (s *Service) updateBucketStats(bucketName string) error {
 			"total_size":      totalSize,
 			"last_checked_at": time.Now(),
 		}
-		
+
 		if err := s.db.Model(&stats).Updates(updates).Error; err != nil {
 			return fmt.Errorf("failed to update bucket stats: %w", err)
 		}
 	}
-	
+
 	return nil
 }
 
 // RecordUploadSession 记录上传会话
-func (s *Service) RecordUploadSession(uploadID, key, bucketName string, totalParts int, size int64) error {
+func (s *Service) RecordUploadSession(uploadID, key, bucketName string, size int64) error {
 	session := &UploadSession{
 		UploadID:   uploadID,
 		Key:        key,
 		BucketName: bucketName,
-		TotalParts: totalParts,
 		Size:       size,
 		Status:     "pending",
 	}
-	
+
 	if err := s.db.Create(session).Error; err != nil {
 		return fmt.Errorf("failed to record upload session: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -291,25 +290,47 @@ func (s *Service) UpdateUploadSession(uploadID string, completedParts int, statu
 		"status":          status,
 		"updated_at":      time.Now(),
 	}
-	
+
 	if err := s.db.Model(&UploadSession{}).
 		Where("upload_id = ?", uploadID).
 		Updates(updates).Error; err != nil {
 		return fmt.Errorf("failed to update upload session: %w", err)
 	}
-	
+
 	return nil
+}
+
+// IncrementUploadSessionSize 增加上传会话的大小（用于累加分片大小）
+func (s *Service) IncrementUploadSessionSize(uploadID string, partSize int64) error {
+	if err := s.db.Model(&UploadSession{}).
+		Where("upload_id = ?", uploadID).
+		UpdateColumn("size", gorm.Expr("size + ?", partSize)).Error; err != nil {
+		return fmt.Errorf("failed to increment upload session size: %w", err)
+	}
+	return nil
+}
+
+// GetUploadSessionSize 获取上传会话当前累积的大小
+func (s *Service) GetUploadSessionSize(uploadID string) (int64, error) {
+	var session UploadSession
+	if err := s.db.Select("size").Where("upload_id = ?", uploadID).First(&session).Error; err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return 0, fmt.Errorf("upload session not found: %s", uploadID)
+		}
+		return 0, fmt.Errorf("failed to get upload session size: %w", err)
+	}
+	return session.Size, nil
 }
 
 // GetPendingUploadSessions 获取正在进行中的上传会话
 func (s *Service) GetPendingUploadSessions(prefix string, keyMarker string, uploadIdMarker string, maxUploads int) ([]*UploadSession, error) {
 	query := s.db.Model(&UploadSession{}).Where("status = ?", "pending")
-	
+
 	// 根据前缀过滤
 	if prefix != "" {
 		query = query.Where("`key` LIKE ?", prefix+"%")
 	}
-	
+
 	// 分页标记处理
 	if keyMarker != "" {
 		if uploadIdMarker != "" {
@@ -319,20 +340,20 @@ func (s *Service) GetPendingUploadSessions(prefix string, keyMarker string, uplo
 			query = query.Where("`key` > ?", keyMarker)
 		}
 	}
-	
+
 	// 限制返回数量
 	if maxUploads > 0 {
 		query = query.Limit(maxUploads + 1) // 多查询一个以判断是否截断
 	}
-	
+
 	// 按key和uploadID排序
 	query = query.Order("`key` ASC, upload_id ASC")
-	
+
 	var sessions []*UploadSession
 	if err := query.Find(&sessions).Error; err != nil {
 		return nil, fmt.Errorf("failed to get pending upload sessions: %w", err)
 	}
-	
+
 	return sessions, nil
 }
 
@@ -358,18 +379,18 @@ func (s *Service) RecordAccessLog(action, key, bucketName, clientIP, userAgent s
 		ErrorMsg:     errorMsg,
 		ResponseTime: responseTime,
 	}
-	
+
 	if err := s.db.Create(log).Error; err != nil {
 		return fmt.Errorf("failed to record access log: %w", err)
 	}
-	
+
 	return nil
 }
 
 // GetAccessLogs 获取访问日志
 func (s *Service) GetAccessLogs(filter *AccessLogFilter) ([]*AccessLog, error) {
 	query := s.db.Model(&AccessLog{})
-	
+
 	if filter != nil {
 		if filter.Action != "" {
 			query = query.Where("action = ?", filter.Action)
@@ -399,12 +420,12 @@ func (s *Service) GetAccessLogs(filter *AccessLogFilter) ([]*AccessLog, error) {
 			query = query.Offset(filter.Offset)
 		}
 	}
-	
+
 	var logs []*AccessLog
 	if err := query.Order("created_at DESC").Find(&logs).Error; err != nil {
 		return nil, fmt.Errorf("failed to get access logs: %w", err)
 	}
-	
+
 	return logs, nil
 }
 
@@ -412,14 +433,14 @@ func (s *Service) GetAccessLogs(filter *AccessLogFilter) ([]*AccessLog, error) {
 func (s *Service) CreateVirtualBucketMapping(virtualBucketName, objectKey, realBucketName string) error {
 	mapping := &VirtualBucketMapping{
 		VirtualBucketName: virtualBucketName,
-		ObjectKey:        objectKey,
-		RealBucketName:   realBucketName,
+		ObjectKey:         objectKey,
+		RealBucketName:    realBucketName,
 	}
-	
+
 	if err := s.db.Create(mapping).Error; err != nil {
 		return fmt.Errorf("failed to create virtual bucket mapping: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -457,15 +478,15 @@ func (s *Service) GetVirtualBucketMappingsForBucket(virtualBucketName string) ([
 func (s *Service) UpdateVirtualBucketMapping(virtualBucketName, objectKey, realBucketName string) error {
 	updates := map[string]interface{}{
 		"real_bucket_name": realBucketName,
-		"updated_at":      time.Now(),
+		"updated_at":       time.Now(),
 	}
-	
+
 	if err := s.db.Model(&VirtualBucketMapping{}).
 		Where("virtual_bucket_name = ? AND object_key = ?", virtualBucketName, objectKey).
 		Updates(updates).Error; err != nil {
 		return fmt.Errorf("failed to update virtual bucket mapping: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -495,23 +516,23 @@ func (s *Service) GetVirtualBucketObjects(virtualBucketName string) ([]*Object, 
 	if err != nil {
 		return nil, err
 	}
-	
+
 	if len(mappings) == 0 {
 		return []*Object{}, nil
 	}
-	
+
 	// 收集所有对象键
 	objectKeys := make([]string, 0, len(mappings))
 	for _, mapping := range mappings {
 		objectKeys = append(objectKeys, mapping.ObjectKey)
 	}
-	
+
 	// 从对象表中查询这些对象
 	var objects []*Object
 	if err := s.db.Where("`key` IN ?", objectKeys).Find(&objects).Error; err != nil {
 		return nil, fmt.Errorf("failed to get objects for virtual bucket: %w", err)
 	}
-	
+
 	return objects, nil
 }
 
