@@ -1,5 +1,5 @@
 # 多阶段构建用于减小镜像大小
-FROM golang:1.24.5-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.24.5-alpine AS builder
 
 # 安装构建依赖
 # 注意：不再需要 gcc, musl-dev, sqlite-dev，因为使用 modernc.org/sqlite 纯Go驱动
@@ -16,8 +16,8 @@ RUN go mod download && go mod tidy
 COPY . .
 
 # 添加构建参数以支持多架构
-ARG TARGETOS=linux
-ARG TARGETARCH=amd64
+ARG TARGETOS
+ARG TARGETARCH
 
 # 构建应用
 # CGO_ENABLED=0: 禁用CGO，使用纯Go SQLite驱动 (modernc.org/sqlite)

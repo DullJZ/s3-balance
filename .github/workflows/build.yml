@@ -94,10 +94,62 @@ jobs:
         draft: false
         prerelease: false
 
-    - name: Upload All Release Assets
+    - name: Upload Linux AMD64 Release Asset
       uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./build
-        asset_name: ""
+        asset_path: ./build/S3Balance_linux_amd64
+        asset_name: S3Balance_linux_amd64
+        asset_content_type: application/octet-stream
+
+    - name: Upload Linux ARM64 Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./build/S3Balance_linux_arm64
+        asset_name: S3Balance_linux_arm64
+        asset_content_type: application/octet-stream
+
+    - name: Upload Darwin AMD64 Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./build/S3Balance_darwin_amd64
+        asset_name: S3Balance_darwin_amd64
+        asset_content_type: application/octet-stream
+
+    - name: Upload Darwin ARM64 Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./build/S3Balance_darwin_arm64
+        asset_name: S3Balance_darwin_arm64
+        asset_content_type: application/octet-stream
+
+    - name: Upload Windows AMD64 Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./build/S3Balance_windows_amd64.exe
+        asset_name: S3Balance_windows_amd64.exe
+        asset_content_type: application/octet-stream
+
+    - name: Upload Windows ARM64 Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./build/S3Balance_windows_arm64.exe
+        asset_name: S3Balance_windows_arm64.exe
         asset_content_type: application/octet-stream
