@@ -36,6 +36,9 @@ func (h *S3Handler) sendS3Error(w http.ResponseWriter, code string, message stri
 		RequestID: fmt.Sprintf("%d", time.Now().UnixNano()),
 	}
 
+	w.Header().Set("X-Amz-Error-Code", code)
+	w.Header().Set("X-Amz-Error-Message", message)
+
 	statusCode := http.StatusBadRequest
 	switch code {
 	case "NoSuchBucket", "NoSuchKey":

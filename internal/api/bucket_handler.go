@@ -12,6 +12,14 @@ import (
 
 // handleListBuckets 处理列出所有存储桶请求
 func (h *S3Handler) handleListBuckets(w http.ResponseWriter, r *http.Request) {
+	start := time.Now()
+	defer func() {
+		if h.storage == nil {
+			return
+		}
+		h.recordAccessLog(r, "list_buckets", "", "", 0, true, "", time.Since(start))
+	}()
+
 	buckets := h.bucketManager.GetAllBuckets()
 
 	result := ListBucketsResult{
