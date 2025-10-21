@@ -46,3 +46,10 @@ logs/
 # Environment variables
 .env
 .env.local
+
+# AI doc
+AGENTS.md
+CLAUDE.md
+
+# Generated files
+s3-balance
