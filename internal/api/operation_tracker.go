@@ -11,6 +11,10 @@ func (h *S3Handler) recordBackendOperation(b *bucket.BucketInfo, category bucket
 	if b == nil {
 		return
 	}
+
+	if h.metrics != nil {
+		h.metrics.RecordBackendOperation(b.Config.Name, string(category))
+	}
 	if disabled := b.RecordOperation(category); disabled {
 		log.Printf("Bucket %s disabled after exceeding %s-type operation limit", b.Config.Name, category)
 	}
