@@ -16,14 +16,27 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+// OperationCategory 表示后端操作分类
+type OperationCategory string
+
+const (
+	// OperationTypeA 表示写入类操作
+	OperationTypeA OperationCategory = "A"
+	// OperationTypeB 表示读取类操作
+	OperationTypeB OperationCategory = "B"
+)
+
 // BucketInfo 存储桶信息
 type BucketInfo struct {
-	Config      config.BucketConfig
-	Client      *s3.Client
-	UsedSize    int64     // 已使用容量（字节）
-	Available   bool      // 是否可用（由health监控更新）
-	LastChecked time.Time // 最后检查时间（由health监控更新）
-	mu          sync.RWMutex
+	Config                config.BucketConfig
+	Client                *s3.Client
+	UsedSize              int64     // 已使用容量（字节）
+	Available             bool      // 是否可用（由health监控更新）
+	LastChecked           time.Time // 最后检查时间（由health监控更新）
+	mu                    sync.RWMutex
+	operationCountA       int64
+	operationCountB       int64
+	operationLimitReached bool
 }
 
 // Manager 存储桶管理器
@@ -265,6 +278,50 @@ func (b *BucketInfo) UpdateUsedSize(delta int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.UsedSize += delta
+}
+
+// RecordOperation 记录一次后端操作并根据配置判断是否需要禁用存储桶
+func (b *BucketInfo) RecordOperation(category OperationCategory) bool {
+	if b == nil {
+		return false
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.Config.Virtual {
+		return false
+	}
+
+	var (
+		limit int64
+		count *int64
+	)
+
+	switch category {
+	case OperationTypeA:
+		b.operationCountA++
+		count = &b.operationCountA
+		limit = int64(b.Config.OperationLimits.TypeA)
+	case OperationTypeB:
+		b.operationCountB++
+		count = &b.operationCountB
+		limit = int64(b.Config.OperationLimits.TypeB)
+	default:
+		return false
+	}
+
+	if limit <= 0 || count == nil {
+		return false
+	}
+
+	if !b.operationLimitReached && *count >= limit {
+		b.Available = false
+		b.operationLimitReached = true
+		return true
+	}
+
+	return false
 }
 
 // IsVirtual 检查是否为虚拟存储桶

@@ -29,17 +29,24 @@ type ServerConfig struct {
 
 // BucketConfig S3存储桶配置
 type BucketConfig struct {
-	Name            string `yaml:"name"`              // 桶名称
-	Endpoint        string `yaml:"endpoint"`          // S3端点
-	Region          string `yaml:"region"`            // 区域
-	AccessKeyID     string `yaml:"access_key_id"`     // 访问密钥ID
-	SecretAccessKey string `yaml:"secret_access_key"` // 访问密钥
-	MaxSize         string `yaml:"max_size"`          // 最大容量 (例如: "10GB")
-	MaxSizeBytes    int64  `yaml:"-"`                 // 内部使用，字节为单位
-	Weight          int    `yaml:"weight"`            // 权重 (用于负载均衡)
-	Enabled         bool   `yaml:"enabled"`           // 是否启用
-	PathStyle       bool   `yaml:"path_style"`        // 是否使用路径风格访问
-	Virtual         bool   `yaml:"virtual"`           // 是否为虚拟存储桶（仅S3 API中可见）
+	Name            string               `yaml:"name"`              // 桶名称
+	Endpoint        string               `yaml:"endpoint"`          // S3端点
+	Region          string               `yaml:"region"`            // 区域
+	AccessKeyID     string               `yaml:"access_key_id"`     // 访问密钥ID
+	SecretAccessKey string               `yaml:"secret_access_key"` // 访问密钥
+	MaxSize         string               `yaml:"max_size"`          // 最大容量 (例如: "10GB")
+	MaxSizeBytes    int64                `yaml:"-"`                 // 内部使用，字节为单位
+	Weight          int                  `yaml:"weight"`            // 权重 (用于负载均衡)
+	Enabled         bool                 `yaml:"enabled"`           // 是否启用
+	PathStyle       bool                 `yaml:"path_style"`        // 是否使用路径风格访问
+	Virtual         bool                 `yaml:"virtual"`           // 是否为虚拟存储桶（仅S3 API中可见）
+	OperationLimits OperationLimitConfig `yaml:"operation_limits"`
+}
+
+// OperationLimitConfig 后端操作次数限制配置
+type OperationLimitConfig struct {
+	TypeA int `yaml:"type_a"` // 类型A操作上限（0表示不限制）
+	TypeB int `yaml:"type_b"` // 类型B操作上限（0表示不限制）
 }
 
 // BalancerConfig 负载均衡配置

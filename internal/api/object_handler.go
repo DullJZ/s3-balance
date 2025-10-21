@@ -70,6 +70,8 @@ func (h *S3Handler) handleGetObject(w http.ResponseWriter, r *http.Request, buck
 			h.sendS3Error(w, "InternalError", "Mapped real bucket not found", key)
 			return
 		}
+
+		h.recordBackendOperation(bucket1, bucket.OperationTypeB)
 	}
 
 	// 生成预签名下载URL
@@ -228,6 +230,8 @@ func (h *S3Handler) handlePutObject(w http.ResponseWriter, r *http.Request, buck
 		return
 	}
 
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeA)
+
 	// 生成预签名上传URL
 	uploadInfo, err := h.presigner.GenerateUploadURL(
 		context.Background(),
@@ -295,7 +299,7 @@ func (h *S3Handler) handleDeleteObject(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 
-	var bucket *bucket.BucketInfo
+	var targetBucket *bucket.BucketInfo
 	var err error
 
 	if requestedBucket.IsVirtual() {
@@ -308,7 +312,7 @@ func (h *S3Handler) handleDeleteObject(w http.ResponseWriter, r *http.Request, b
 		}
 
 		// 获取映射到的真实存储桶
-		bucket, ok = h.bucketManager.GetBucket(mapping.RealBucketName)
+		targetBucket, ok = h.bucketManager.GetBucket(mapping.RealBucketName)
 		if !ok {
 			h.sendS3Error(w, "InternalError", "Mapped real bucket not found", key)
 			return
@@ -319,10 +323,12 @@ func (h *S3Handler) handleDeleteObject(w http.ResponseWriter, r *http.Request, b
 		return
 	}
 
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeA)
+
 	// 生成预签名删除URL
 	deleteInfo, err := h.presigner.GenerateDeleteURL(
 		context.Background(),
-		bucket,
+		targetBucket,
 		key,
 	)
 	if err != nil {

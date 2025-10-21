@@ -48,6 +48,9 @@ buckets:
     enabled: true
     path_style: false  # AWS S3使用虚拟主机风格
     virtual: false  # 这是真实存储桶
+    operation_limits:
+      type_a: 0  # 类型A操作（写入类）上限，0表示不限制
+      type_b: 0  # 类型B操作（读取类）上限，0表示不限制
 
   # 真实存储桶 - MinIO（用于存储数据，对客户端隐藏）
   - name: "my-bucket-2"
@@ -60,6 +63,9 @@ buckets:
     enabled: true
     path_style: true  # MinIO通常使用路径风格
     virtual: false  # 这是真实存储桶
+    operation_limits:
+      type_a: 0
+      type_b: 0
 
   # 虚拟存储桶 - user-bucket-1（对客户端可见的唯一存储桶）
   - name: "user-bucket-1"
@@ -96,6 +102,9 @@ buckets:
     enabled: true
     path_style: false
     virtual: false  # 这是真实存储桶
+    operation_limits:
+      type_a: 0
+      type_b: 0
 
 # 负载均衡配置
 balancer:
