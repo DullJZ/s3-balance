@@ -45,6 +45,23 @@ func (BucketStats) TableName() string {
 	return "bucket_stats"
 }
 
+// BucketMonthlyStats 存储桶月度统计信息模型
+type BucketMonthlyStats struct {
+	ID              uint      `gorm:"primaryKey" json:"id"`
+	BucketName      string    `gorm:"index:idx_bucket_month;size:255;not null" json:"bucket_name"`
+	Year            int       `gorm:"index:idx_bucket_month;not null" json:"year"`
+	Month           int       `gorm:"index:idx_bucket_month;not null" json:"month"`
+	OperationCountA int64     `gorm:"not null;default:0" json:"operation_count_a"`
+	OperationCountB int64     `gorm:"not null;default:0" json:"operation_count_b"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
+}
+
+// TableName 指定表名
+func (BucketMonthlyStats) TableName() string {
+	return "bucket_monthly_stats"
+}
+
 // VirtualBucketMapping 虚拟存储桶文件级映射模型
 type VirtualBucketMapping struct {
 	ID                uint      `gorm:"primaryKey" json:"id"`
