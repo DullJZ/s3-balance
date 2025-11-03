@@ -631,29 +631,69 @@ func (s *Service) DeleteVirtualBucketFileMapping(virtualBucketName, objectKey st
 	return nil
 }
 
-// ArchiveMonthlyStats 归档指定月份的统计数据
+// ArchiveMonthlyStats 归档指定月份的统计数据（存储增量值，非累计值）
 // 如果该月份的记录已存在，则更新；否则创建新记录
 func (s *Service) ArchiveMonthlyStats(year, month int) error {
-	var stats []BucketStats
-	if err := s.db.Find(&stats).Error; err != nil {
+	// 获取当前所有bucket的累计统计
+	var currentStats []BucketStats
+	if err := s.db.Find(&currentStats).Error; err != nil {
 		return fmt.Errorf("failed to fetch bucket stats: %w", err)
 	}
 
-	for _, stat := range stats {
+	// 获取上个月的累计值（从上月归档数据推算）
+	lastYear, lastMonth := year, month-1
+	if lastMonth == 0 {
+		lastMonth = 12
+		lastYear--
+	}
+
+	// 查询上个月及之前的所有归档数据，用于推算上月末的累计值
+	var lastMonthArchived []BucketMonthlyStats
+	lastMonthMap := make(map[string]int64) // bucket_name -> last_month_cumulative_a
+	lastMonthMapB := make(map[string]int64) // bucket_name -> last_month_cumulative_b
+
+	if err := s.db.Where("year < ? OR (year = ? AND month <= ?)", lastYear, lastYear, lastMonth).
+		Order("year ASC, month ASC").
+		Find(&lastMonthArchived).Error; err == nil {
+
+		// 累加历史增量得到上月末累计值
+		cumulativeA := make(map[string]int64)
+		cumulativeB := make(map[string]int64)
+
+		for _, archived := range lastMonthArchived {
+			cumulativeA[archived.BucketName] += archived.OperationCountA
+			cumulativeB[archived.BucketName] += archived.OperationCountB
+		}
+
+		lastMonthMap = cumulativeA
+		lastMonthMapB = cumulativeB
+	}
+
+	// 对每个bucket，计算本月增量并存储
+	for _, stat := range currentStats {
+		lastCumulativeA := lastMonthMap[stat.BucketName]
+		lastCumulativeB := lastMonthMapB[stat.BucketName]
+
+		incrementA := stat.OperationCountA - lastCumulativeA
+		incrementB := stat.OperationCountB - lastCumulativeB
+
+		// 如果是首次运行（没有历史数据），incrementA/B 可能等于累计值
+		// 这是预期行为：首月记录的就是从0到当前的增量
+
 		monthlyStats := BucketMonthlyStats{
 			BucketName:      stat.BucketName,
 			Year:            year,
 			Month:           month,
-			OperationCountA: stat.OperationCountA,
-			OperationCountB: stat.OperationCountB,
+			OperationCountA: incrementA,
+			OperationCountB: incrementB,
 		}
 
 		// 使用 UPSERT 逻辑：如果存在则更新，否则创建
 		if err := s.db.Where("bucket_name = ? AND year = ? AND month = ?",
 			stat.BucketName, year, month).
 			Assign(BucketMonthlyStats{
-				OperationCountA: stat.OperationCountA,
-				OperationCountB: stat.OperationCountB,
+				OperationCountA: incrementA,
+				OperationCountB: incrementB,
 			}).
 			FirstOrCreate(&monthlyStats).Error; err != nil {
 			return fmt.Errorf("failed to archive monthly stats for bucket %s: %w", stat.BucketName, err)
@@ -685,24 +725,28 @@ func (s *Service) GetMonthlyStatsRange(startYear, startMonth, endYear, endMonth 
 	return stats, nil
 }
 
-// GetCurrentMonthStats 获取当前月份的实时统计（从 bucket_stats 计算）
+// GetCurrentMonthStats 获取当前月份的实时统计（从 bucket_stats 计算增量）
 func (s *Service) GetCurrentMonthStats() ([]BucketMonthlyStats, error) {
 	now := time.Now()
 	year, month := now.Year(), int(now.Month())
 
-	// 获取上个月的归档数据
-	var lastMonthStats []BucketMonthlyStats
+	// 获取上个月末的累计值（通过累加所有历史增量）
 	lastYear, lastMonth := year, month-1
 	if lastMonth == 0 {
 		lastMonth = 12
 		lastYear--
 	}
 
-	lastMonthMap := make(map[string]BucketMonthlyStats)
-	if err := s.db.Where("year = ? AND month = ?", lastYear, lastMonth).
-		Find(&lastMonthStats).Error; err == nil {
-		for _, stat := range lastMonthStats {
-			lastMonthMap[stat.BucketName] = stat
+	var historicalStats []BucketMonthlyStats
+	lastMonthCumulativeA := make(map[string]int64)
+	lastMonthCumulativeB := make(map[string]int64)
+
+	if err := s.db.Where("year < ? OR (year = ? AND month <= ?)", lastYear, lastYear, lastMonth).
+		Find(&historicalStats).Error; err == nil {
+		// 累加所有历史增量得到上月末累计值
+		for _, stat := range historicalStats {
+			lastMonthCumulativeA[stat.BucketName] += stat.OperationCountA
+			lastMonthCumulativeB[stat.BucketName] += stat.OperationCountB
 		}
 	}
 
@@ -715,13 +759,15 @@ func (s *Service) GetCurrentMonthStats() ([]BucketMonthlyStats, error) {
 	// 计算当前月份的增量
 	result := make([]BucketMonthlyStats, 0, len(currentStats))
 	for _, current := range currentStats {
-		lastMonth := lastMonthMap[current.BucketName]
+		incrementA := current.OperationCountA - lastMonthCumulativeA[current.BucketName]
+		incrementB := current.OperationCountB - lastMonthCumulativeB[current.BucketName]
+
 		result = append(result, BucketMonthlyStats{
 			BucketName:      current.BucketName,
 			Year:            year,
 			Month:           month,
-			OperationCountA: current.OperationCountA - lastMonth.OperationCountA,
-			OperationCountB: current.OperationCountB - lastMonth.OperationCountB,
+			OperationCountA: incrementA,
+			OperationCountB: incrementB,
 			UpdatedAt:       time.Now(),
 		})
 	}
