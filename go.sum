@@ -1,7 +1,7 @@
 filippo.io/edwards25519 v1.1.0 h1:FNf4tywRC1HmFuKW5xopWpigGjJKiJSV0Cqo0cJWDaA=
 filippo.io/edwards25519 v1.1.0/go.mod h1:BxyFTGdWcka3PhytdK4V28tE5sGfRvvvRV7EaN4VDT4=
-github.com/DullJZ/s3-validate v0.0.0-20251004111253-b3ec227d3796 h1:0Lipgc3EHF2QOKpCziXApbVocdyzZ/3a52xluuWraXg=
-github.com/DullJZ/s3-validate v0.0.0-20251004111253-b3ec227d3796/go.mod h1:OEx+/bRlDdI0oj/Bb1Plsq+1+qU1qal3/g9phixhU6Y=
+github.com/DullJZ/s3-validate v0.0.0-20251103105435-c25eac6b580b h1:BHue7N77inSdaDUUZSO/gMmc3+4ZGdQA3ORdcLHnxtg=
+github.com/DullJZ/s3-validate v0.0.0-20251103105435-c25eac6b580b/go.mod h1:OEx+/bRlDdI0oj/Bb1Plsq+1+qU1qal3/g9phixhU6Y=
 github.com/aws/aws-sdk-go-v2 v1.39.2 h1:EJLg8IdbzgeD7xgvZ+I8M1e0fL0ptn/M47lianzth0I=
 github.com/aws/aws-sdk-go-v2 v1.39.2/go.mod h1:sDioUELIUO9Znk23YVmIk86/9DOpkbyyVb1i/gUNFXY=
 github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.0 h1:6GMWV6CNpA/6fbFHnoAjrv4+LGfyTqZz2LtCHnspgDg=
