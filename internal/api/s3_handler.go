@@ -76,7 +76,7 @@ func (h *S3Handler) RegisterS3Routes(router *mux.Router) {
 
 	// 带认证/虚拟主机的路由
 	protected := router.NewRoute().PathPrefix("/{bucket}").Subrouter()
-	protected.StrictSlash(true)
+	// 注意：不使用 StrictSlash(true) 以避免 301 重定向，兼容WinSCP
 
 	// Bucket operations
 	protected.HandleFunc("", h.handleBucketOperations).Methods("GET", "HEAD", "PUT", "DELETE")
