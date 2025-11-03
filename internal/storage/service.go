@@ -680,6 +680,14 @@ func (s *Service) ArchiveMonthlyStats(year, month int) error {
 		// 如果是首次运行（没有历史数据），incrementA/B 可能等于累计值
 		// 这是预期行为：首月记录的就是从0到当前的增量
 
+		// 边界情况：如果计算出负值，说明数据不一致，设置为0
+		if incrementA < 0 {
+			incrementA = 0
+		}
+		if incrementB < 0 {
+			incrementB = 0
+		}
+
 		monthlyStats := BucketMonthlyStats{
 			BucketName:      stat.BucketName,
 			Year:            year,
@@ -761,6 +769,14 @@ func (s *Service) GetCurrentMonthStats() ([]BucketMonthlyStats, error) {
 	for _, current := range currentStats {
 		incrementA := current.OperationCountA - lastMonthCumulativeA[current.BucketName]
 		incrementB := current.OperationCountB - lastMonthCumulativeB[current.BucketName]
+
+		// 边界情况：如果计算出负值，说明数据不一致，设置为0
+		if incrementA < 0 {
+			incrementA = 0
+		}
+		if incrementB < 0 {
+			incrementB = 0
+		}
 
 		result = append(result, BucketMonthlyStats{
 			BucketName:      current.BucketName,
