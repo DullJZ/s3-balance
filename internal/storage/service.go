@@ -304,18 +304,29 @@ func (s *Service) IncrementBucketOperation(bucketName, category string) (int64, 
 		return 0, fmt.Errorf("unknown operation category: %s", category)
 	}
 
-	if err := s.db.Model(&BucketStats{}).
-		Where("bucket_name = ?", bucketName).
-		UpdateColumn(field, gorm.Expr(field+" + ?", 1)).Error; err != nil {
-		return 0, fmt.Errorf("failed to increment %s for bucket %s: %w", field, bucketName, err)
-	}
-
+	// 使用事务确保原子性
 	var count int64
-	if err := s.db.Model(&BucketStats{}).
-		Where("bucket_name = ?", bucketName).
-		Select(field).
-		Scan(&count).Error; err != nil {
-		return 0, fmt.Errorf("failed to fetch updated %s for bucket %s: %w", field, bucketName, err)
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 原子递增
+		if err := tx.Model(&BucketStats{}).
+			Where("bucket_name = ?", bucketName).
+			UpdateColumn(field, gorm.Expr(field+" + ?", 1)).Error; err != nil {
+			return fmt.Errorf("failed to increment %s for bucket %s: %w", field, bucketName, err)
+		}
+
+		// 在同一事务中读取最新值
+		if err := tx.Model(&BucketStats{}).
+			Where("bucket_name = ?", bucketName).
+			Select(field).
+			Scan(&count).Error; err != nil {
+			return fmt.Errorf("failed to fetch updated %s for bucket %s: %w", field, bucketName, err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
 	}
 
 	return count, nil
