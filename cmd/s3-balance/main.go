@@ -137,8 +137,9 @@ func main() {
 		log.Println("Management API enabled")
 		adminHandler := api.NewAdminHandler(bucketManager, lb, cfg)
 
-		// 创建子路由器并应用Token认证中间件
+		// 创建子路由器并应用中间件
 		apiRouter := router.PathPrefix("/api").Subrouter()
+		apiRouter.Use(corsMiddleware) // 先应用 CORS 中间件，处理 OPTIONS 预检请求
 		apiRouter.Use(middleware.TokenAuthMiddleware(cfg.API.Token))
 		adminHandler.RegisterRoutes(apiRouter)
 
