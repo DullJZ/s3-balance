@@ -413,6 +413,25 @@ func (b *BucketInfo) IsVirtual() bool {
 	return b.Config.Virtual
 }
 
+// GetOperationCount 获取指定类型的操作计数
+func (b *BucketInfo) GetOperationCount(category OperationCategory) int64 {
+	if b == nil {
+		return 0
+	}
+
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	switch category {
+	case OperationTypeA:
+		return b.operationCountA
+	case OperationTypeB:
+		return b.operationCountB
+	default:
+		return 0
+	}
+}
+
 // GetVirtualBuckets 获取所有虚拟存储桶
 func (m *Manager) GetVirtualBuckets() []*BucketInfo {
 	m.mu.RLock()

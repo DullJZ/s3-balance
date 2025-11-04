@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/DullJZ/s3-validate/pkg/s3validate"
 )
@@ -75,4 +76,37 @@ func invokeOnError(w http.ResponseWriter, r *http.Request, cfg S3SignatureConfig
 		return
 	}
 	http.Error(w, message, http.StatusForbidden)
+}
+
+// TokenAuthMiddleware 创建Token认证中间件，用于管理API
+func TokenAuthMiddleware(validToken string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// 从Authorization头中提取token
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				w.Header().Set("Content-Type", "application/json")
+				http.Error(w, `{"error": "missing authorization header"}`, http.StatusUnauthorized)
+				return
+			}
+
+			// 支持两种格式：
+			// 1. Bearer <token>
+			// 2. <token>
+			token := authHeader
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				token = strings.TrimPrefix(authHeader, "Bearer ")
+			}
+
+			// 验证token
+			if token != validToken {
+				w.Header().Set("Content-Type", "application/json")
+				http.Error(w, `{"error": "invalid token"}`, http.StatusUnauthorized)
+				return
+			}
+
+			// 继续处理请求
+			next.ServeHTTP(w, r)
+		})
+	}
 }

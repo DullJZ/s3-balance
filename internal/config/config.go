@@ -16,6 +16,7 @@ type Config struct {
 	Balancer BalancerConfig `yaml:"balancer"`
 	Metrics  MetricsConfig  `yaml:"metrics"`
 	S3API    S3APIConfig    `yaml:"s3api"`
+	API      APIConfig      `yaml:"api"`
 }
 
 // ServerConfig 服务器配置
@@ -73,6 +74,12 @@ type S3APIConfig struct {
 	ProxyMode    bool   `yaml:"proxy_mode"`    // 是否使用代理模式（而非重定向）
 	AuthRequired bool   `yaml:"auth_required"` // 是否需要认证
 	Host         string `yaml:"host"`          // 用于签名验证的Host（为空则使用请求的Host）
+}
+
+// APIConfig 管理API配置
+type APIConfig struct {
+	Enabled bool   `yaml:"enabled"` // 是否启用管理API
+	Token   string `yaml:"token"`   // API访问令牌
 }
 
 // DatabaseConfig 数据库配置
@@ -178,6 +185,11 @@ func (c *Config) SetDefaults() {
 	}
 	if c.S3API.SecretKey == "" {
 		c.S3API.SecretKey = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+	}
+
+	// 管理API默认值
+	if c.API.Token == "" {
+		c.API.Token = "your-secure-api-token-here"
 	}
 }
 

@@ -133,13 +133,13 @@ metrics:
 s3api:
   # 客户端连接用的Access Key
   access_key: "AKIAIOSFODNN7EXAMPLE"
-  
+
   # 客户端连接用的Secret Key
   secret_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-  
+
   # 是否使用虚拟主机模式
   virtual_host: false
-  
+
   # 工作模式：
   # false：预签名重定向模式，客户端下载直接重定向到与后端存储
   # true (默认)：代理模式，数据通过S3 Balance服务器中转传输
@@ -154,3 +154,12 @@ s3api:
   # 留空则使用请求中的 Host 头
   # 示例: "s3.example.com" 或 "s3.example.com:8080"
   host: ""
+
+# 管理API配置
+api:
+  # 是否启用管理API
+  enabled: true
+
+  # API访问令牌（用于管理接口的身份验证）
+  # 请修改为强密码，建议使用随机生成的长字符串
+  token: "your-secure-api-token-change-this"
