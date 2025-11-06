@@ -16,6 +16,7 @@ type AdminHandler struct {
 	bucketManager *bucket.Manager
 	balancer      *balancer.Balancer
 	config        *config.Config
+	configManager *config.Manager
 }
 
 // NewAdminHandler 创建新的管理API处理器
@@ -23,11 +24,13 @@ func NewAdminHandler(
 	bucketManager *bucket.Manager,
 	balancer *balancer.Balancer,
 	cfg *config.Config,
+	configManager *config.Manager,
 ) *AdminHandler {
 	return &AdminHandler{
 		bucketManager: bucketManager,
 		balancer:      balancer,
 		config:        cfg,
+		configManager: configManager,
 	}
 }
 
@@ -77,6 +80,8 @@ func (h *AdminHandler) RegisterRoutes(router *mux.Router) {
 	router.HandleFunc("/buckets", h.ListBuckets).Methods(http.MethodGet, http.MethodOptions)
 	router.HandleFunc("/buckets/{name}", h.GetBucketDetail).Methods(http.MethodGet, http.MethodOptions)
 	router.HandleFunc("/health", h.GetHealth).Methods(http.MethodGet, http.MethodOptions)
+	router.HandleFunc("/config", h.GetConfig).Methods(http.MethodGet, http.MethodOptions)
+	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost, http.MethodOptions)
 }
 
 // ListBuckets 获取存储桶列表
@@ -133,6 +138,58 @@ func (h *AdminHandler) GetHealth(w http.ResponseWriter, r *http.Request) {
 		TotalBuckets:     len(buckets),
 		AvailableBuckets: len(availableBuckets),
 		Database:         h.config.Database.Type,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// GetConfig 获取当前配置
+func (h *AdminHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	if h.configManager == nil {
+		http.Error(w, `{"error": "config manager not available"}`, http.StatusInternalServerError)
+		return
+	}
+
+	currentConfig := h.configManager.GetConfig()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(currentConfig)
+}
+
+// UpdateConfig 更新配置
+func (h *AdminHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+	if h.configManager == nil {
+		http.Error(w, `{"error": "config manager not available"}`, http.StatusInternalServerError)
+		return
+	}
+
+	// 解析请求体
+	var newConfig config.Config
+	if err := json.NewDecoder(r.Body).Decode(&newConfig); err != nil {
+		http.Error(w, `{"error": "invalid JSON format: `+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+
+	// 设置默认值
+	newConfig.SetDefaults()
+
+	// 更新配置
+	if err := h.configManager.UpdateConfig(&newConfig); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"error":   "validation failed",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	// 返回成功响应
+	response := map[string]interface{}{
+		"success": true,
+		"message": "Configuration updated successfully. Changes will take effect automatically.",
+		"config":  &newConfig,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

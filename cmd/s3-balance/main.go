@@ -135,13 +135,15 @@ func main() {
 	// 必须在S3路由之前注册，因为S3路由使用 /{bucket} 通配符会匹配所有路径
 	if cfg.API.Enabled {
 		log.Println("Management API enabled")
-		adminHandler := api.NewAdminHandler(bucketManager, lb, cfg)
+		adminHandler := api.NewAdminHandler(bucketManager, lb, cfg, configManager)
+		statsHandler := api.NewStatsHandler(storageService)
 
 		// 创建子路由器并应用中间件
 		apiRouter := router.PathPrefix("/api").Subrouter()
 		apiRouter.Use(corsMiddleware) // 先应用 CORS 中间件，处理 OPTIONS 预检请求
 		apiRouter.Use(middleware.TokenAuthMiddleware(cfg.API.Token))
 		adminHandler.RegisterRoutes(apiRouter)
+		statsHandler.RegisterRoutes(apiRouter)
 
 		log.Printf("Management API endpoints available at /api/*")
 	}

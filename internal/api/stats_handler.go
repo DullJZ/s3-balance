@@ -25,10 +25,11 @@ func NewStatsHandler(storage *storage.Service) *StatsHandler {
 
 // RegisterRoutes 注册统计API路由
 func (h *StatsHandler) RegisterRoutes(router *mux.Router) {
-	router.HandleFunc("/api/stats/monthly", h.GetCurrentMonthStats).Methods("GET")
-	router.HandleFunc("/api/stats/monthly/{year}/{month}", h.GetMonthlyStats).Methods("GET")
-	router.HandleFunc("/api/stats/monthly/range", h.GetMonthlyStatsRange).Methods("GET")
-	router.HandleFunc("/api/stats/bucket/{bucket}/history", h.GetBucketHistory).Methods("GET")
+	// 注意: router 参数应该是已经带有 /api 前缀的子路由器
+	router.HandleFunc("/stats/monthly", h.GetCurrentMonthStats).Methods(http.MethodGet, http.MethodOptions)
+	router.HandleFunc("/stats/monthly/{year}/{month}", h.GetMonthlyStats).Methods(http.MethodGet, http.MethodOptions)
+	router.HandleFunc("/stats/monthly/range", h.GetMonthlyStatsRange).Methods(http.MethodGet, http.MethodOptions)
+	router.HandleFunc("/stats/bucket/{bucket}/history", h.GetBucketHistory).Methods(http.MethodGet, http.MethodOptions)
 }
 
 // MonthlyStatsResponse 月度统计响应
