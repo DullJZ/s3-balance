@@ -54,3 +54,5 @@ docs/
 
 # Generated files
 s3-balance
+
+dist/
