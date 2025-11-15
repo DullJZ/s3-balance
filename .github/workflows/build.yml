@@ -28,7 +28,7 @@ jobs:
         curl -L -o dist.tar.gz "https://github.com/DullJZ/s3-balance-web/releases/download/$LATEST_RELEASE/dist.tar.gz"
 
         mkdir -p internal/webui/dist
-        tar -xzf dist.tar.gz -C internal/webui/
+        tar -xzf dist.tar.gz -C internal/webui/dist/
         rm dist.tar.gz
 
         echo "Frontend assets downloaded and extracted to internal/webui/dist"
@@ -86,7 +86,7 @@ jobs:
         curl -L -o dist.tar.gz "https://github.com/DullJZ/s3-balance-web/releases/download/$LATEST_RELEASE/dist.tar.gz"
 
         mkdir -p internal/webui/dist
-        tar -xzf dist.tar.gz -C internal/webui/
+        tar -xzf dist.tar.gz -C internal/webui/dist/
         rm dist.tar.gz
 
         echo "Frontend assets downloaded and extracted to internal/webui/dist"
