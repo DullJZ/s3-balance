@@ -237,7 +237,7 @@ func (h *S3Handler) handleCreateBucket(w http.ResponseWriter, r *http.Request, b
 		targetBucket := realBuckets[0]
 
 		// 创建虚拟存储桶到真实存储桶的映射
-		if err := h.storage.CreateVirtualBucketMapping(bucketName, "", targetBucket.Config.Name); err != nil {
+		if err := h.storage.CreateVirtualBucketMapping(bucketName, "", targetBucket.Config.Name, ""); err != nil {
 			h.sendS3Error(w, "InternalError", "Failed to create virtual bucket mapping", bucketName)
 			return
 		}

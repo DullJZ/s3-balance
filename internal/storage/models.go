@@ -66,8 +66,9 @@ func (BucketMonthlyStats) TableName() string {
 type VirtualBucketMapping struct {
 	ID                uint      `gorm:"primaryKey" json:"id"`
 	VirtualBucketName string    `gorm:"index;size:255;not null" json:"virtual_bucket_name"`
-	ObjectKey         string    `gorm:"index;size:512;not null" json:"object_key"`
+	ObjectKey         string    `gorm:"index;size:512;not null" json:"object_key"`        // 虚拟对象key
 	RealBucketName    string    `gorm:"index;size:255;not null" json:"real_bucket_name"`
+	RealObjectKey     string    `gorm:"size:512;not null" json:"real_object_key"`          // 真实对象key
 	CreatedAt         time.Time `gorm:"not null" json:"created_at"`
 	UpdatedAt         time.Time `gorm:"not null" json:"updated_at"`
 }

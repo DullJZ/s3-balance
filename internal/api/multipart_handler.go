@@ -57,8 +57,8 @@ func (h *S3Handler) handleUploadPart(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 
-			// 创建虚拟存储桶文件级映射
-			if err := h.storage.CreateVirtualBucketMapping(bucketName, key, targetBucket.Config.Name); err != nil {
+			// 创建虚拟存储桶文件级映射（对于Multipart，虚拟key和真实key相同）
+			if err := h.storage.CreateVirtualBucketMapping(bucketName, key, targetBucket.Config.Name, key); err != nil {
 				h.sendS3Error(w, "InternalError", "Failed to create virtual bucket file mapping", key)
 				return
 			}
@@ -204,8 +204,8 @@ func (h *S3Handler) handleMultipartUpload(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		// 创建虚拟存储桶文件级映射
-		if err := h.storage.CreateVirtualBucketMapping(bucketName, key, targetBucket.Config.Name); err != nil {
+		// 创建虚拟存储桶文件级映射（对于Multipart，虚拟key和真实key相同）
+		if err := h.storage.CreateVirtualBucketMapping(bucketName, key, targetBucket.Config.Name, key); err != nil {
 			h.sendS3Error(w, "InternalError", "Failed to create virtual bucket file mapping", key)
 			return
 		}

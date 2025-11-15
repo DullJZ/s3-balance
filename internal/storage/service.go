@@ -101,6 +101,63 @@ func (s *Service) GetObjectInfo(key string) (*Object, error) {
 	return &obj, nil
 }
 
+// CopyObject 复制对象（只创建新的数据库映射记录，不复制实际数据）
+func (s *Service) CopyObject(sourceKey, destKey string, metadata map[string]string) error {
+	// 获取源对象信息
+	sourceObj, err := s.GetObjectInfo(sourceKey)
+	if err != nil {
+		return fmt.Errorf("source object not found: %w", err)
+	}
+
+	// 检查目标对象是否已存在
+	var existingObj Object
+	if err := s.db.Where("`key` = ?", destKey).Where("`deleted_at` IS NULL").First(&existingObj).Error; err == nil {
+		// 目标对象已存在，删除旧的
+		if err := s.DeleteObject(destKey); err != nil {
+			return fmt.Errorf("failed to delete existing destination object: %w", err)
+		}
+	}
+
+	// 清理已软删除的同名对象
+	var deletedObj Object
+	if err := s.db.Unscoped().Where("`key` = ?", destKey).Where("`deleted_at` IS NOT NULL").First(&deletedObj).Error; err == nil {
+		if err := s.db.Unscoped().Delete(&deletedObj).Error; err != nil {
+			return fmt.Errorf("failed to permanently delete soft-deleted object: %w", err)
+		}
+	}
+
+	// 创建新的对象记录，指向相同的真实存储桶
+	newObj := &Object{
+		Key:        destKey,
+		BucketName: sourceObj.BucketName, // 指向相同的真实桶
+		Size:       sourceObj.Size,
+	}
+
+	// 使用提供的元数据，如果没有则复制源对象的元数据
+	if len(metadata) > 0 {
+		newObj.Metadata = make(JSON)
+		for k, v := range metadata {
+			newObj.Metadata[k] = v
+		}
+	} else {
+		// 复制源对象的元数据
+		newObj.Metadata = make(JSON)
+		for k, v := range sourceObj.Metadata {
+			newObj.Metadata[k] = v
+		}
+	}
+
+	// 插入新记录
+	if err := s.db.Create(newObj).Error; err != nil {
+		return fmt.Errorf("failed to create copy object record: %w", err)
+	}
+
+	// 更新存储桶统计
+	s.updateBucketStats(sourceObj.BucketName)
+
+	return nil
+}
+
 // DeleteObject 删除对象记录（软删除）
 func (s *Service) DeleteObject(key string) error {
 	var obj Object
@@ -527,11 +584,12 @@ func (s *Service) GetAccessLogs(filter *AccessLogFilter) ([]*AccessLog, error) {
 }
 
 // CreateVirtualBucketMapping 创建虚拟存储桶文件级映射
-func (s *Service) CreateVirtualBucketMapping(virtualBucketName, objectKey, realBucketName string) error {
+func (s *Service) CreateVirtualBucketMapping(virtualBucketName, objectKey, realBucketName, realObjectKey string) error {
 	mapping := &VirtualBucketMapping{
 		VirtualBucketName: virtualBucketName,
 		ObjectKey:         objectKey,
 		RealBucketName:    realBucketName,
+		RealObjectKey:     realObjectKey,
 	}
 
 	if err := s.db.Create(mapping).Error; err != nil {
@@ -551,6 +609,17 @@ func (s *Service) GetVirtualBucketMapping(virtualBucketName, objectKey string) (
 		return nil, fmt.Errorf("failed to get virtual bucket mapping: %w", err)
 	}
 	return &mapping, nil
+}
+
+// CountMappingsToRealObject 统计指向同一真实对象的映射数量
+func (s *Service) CountMappingsToRealObject(realBucketName, realObjectKey string) (int64, error) {
+	var count int64
+	if err := s.db.Model(&VirtualBucketMapping{}).
+		Where("real_bucket_name = ? AND real_object_key = ?", realBucketName, realObjectKey).
+		Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("failed to count mappings: %w", err)
+	}
+	return count, nil
 }
 
 // GetVirtualBucketMappings 获取所有虚拟存储桶映射
@@ -618,19 +687,45 @@ func (s *Service) GetVirtualBucketObjects(virtualBucketName string) ([]*Object, 
 		return []*Object{}, nil
 	}
 
-	// 收集所有对象键
-	objectKeys := make([]string, 0, len(mappings))
+	// 收集所有真实对象键
+	realObjectKeys := make([]string, 0, len(mappings))
 	for _, mapping := range mappings {
-		objectKeys = append(objectKeys, mapping.ObjectKey)
+		realObjectKeys = append(realObjectKeys, mapping.RealObjectKey)
 	}
 
-	// 从对象表中查询这些对象
-	var objects []*Object
-	if err := s.db.Where("`key` IN ?", objectKeys).Find(&objects).Error; err != nil {
+	// 从对象表中查询这些真实对象
+	var realObjects []*Object
+	if err := s.db.Where("`key` IN ?", realObjectKeys).Find(&realObjects).Error; err != nil {
 		return nil, fmt.Errorf("failed to get objects for virtual bucket: %w", err)
 	}
 
-	return objects, nil
+	// 创建真实key到对象的映射
+	realObjectMap := make(map[string]*Object)
+	for _, obj := range realObjects {
+		realObjectMap[obj.Key] = obj
+	}
+
+	// 构建虚拟对象列表（使用虚拟key，但其他信息来自真实对象）
+	virtualObjects := make([]*Object, 0, len(mappings))
+	for _, mapping := range mappings {
+		if realObj, exists := realObjectMap[mapping.RealObjectKey]; exists {
+			// 创建虚拟对象副本，使用虚拟key
+			virtualObj := &Object{
+				ID:          realObj.ID,
+				Key:         mapping.ObjectKey, // 使用虚拟key
+				BucketName:  realObj.BucketName,
+				Size:        realObj.Size,
+				Metadata:    realObj.Metadata,
+				ContentType: realObj.ContentType,
+				ETag:        realObj.ETag,
+				CreatedAt:   realObj.CreatedAt,
+				UpdatedAt:   realObj.UpdatedAt,
+			}
+			virtualObjects = append(virtualObjects, virtualObj)
+		}
+	}
+
+	return virtualObjects, nil
 }
 
 // DeleteVirtualBucketFileMapping 删除虚拟存储桶文件映射
