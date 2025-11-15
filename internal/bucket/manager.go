@@ -10,20 +10,34 @@ import (
 	"github.com/DullJZ/s3-balance/internal/config"
 	"github.com/DullJZ/s3-balance/internal/health"
 	"github.com/DullJZ/s3-balance/internal/metrics"
+	"github.com/DullJZ/s3-balance/internal/storage"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+// OperationCategory 表示后端操作分类
+type OperationCategory string
+
+const (
+	// OperationTypeA 表示写入类操作
+	OperationTypeA OperationCategory = "A"
+	// OperationTypeB 表示读取类操作
+	OperationTypeB OperationCategory = "B"
+)
+
 // BucketInfo 存储桶信息
 type BucketInfo struct {
-	Config      config.BucketConfig
-	Client      *s3.Client
-	UsedSize    int64     // 已使用容量（字节）
-	Available   bool      // 是否可用（由health监控更新）
-	LastChecked time.Time // 最后检查时间（由health监控更新）
-	mu          sync.RWMutex
+	Config                config.BucketConfig
+	Client                *s3.Client
+	UsedSize              int64     // 已使用容量（字节）
+	Available             bool      // 是否可用（由health监控更新）
+	LastChecked           time.Time // 最后检查时间（由health监控更新）
+	mu                    sync.RWMutex
+	operationCountA       int64
+	operationCountB       int64
+	operationLimitReached bool
 }
 
 // Manager 存储桶管理器
@@ -36,15 +50,17 @@ type Manager struct {
 	healthMonitor *health.Monitor
 	statsMonitor  *health.StatsMonitor
 	monitorCtx    context.Context
+	storage       *storage.Service
 }
 
 // NewManager 创建新的存储桶管理器
-func NewManager(cfg *config.Config, metrics *metrics.Metrics) (*Manager, error) {
+func NewManager(cfg *config.Config, metrics *metrics.Metrics, storageService *storage.Service) (*Manager, error) {
 	m := &Manager{
 		buckets:  make(map[string]*BucketInfo),
 		config:   cfg,
 		stopChan: make(chan struct{}),
 		metrics:  metrics,
+		storage:  storageService,
 	}
 
 	// 初始化所有存储桶客户端
@@ -71,7 +87,47 @@ func NewManager(cfg *config.Config, metrics *metrics.Metrics) (*Manager, error) 
 	// 初始化健康监控
 	m.initHealthMonitoring()
 
+	// 加载持久化的操作计数
+	m.loadOperationCounts()
+
 	return m, nil
+}
+
+func (m *Manager) loadOperationCounts() {
+	if m.storage == nil {
+		return
+	}
+
+	counts, err := m.storage.GetBucketOperationCounts()
+	if err != nil {
+		log.Printf("Failed to load bucket operation counts: %v", err)
+		return
+	}
+
+	m.mu.RLock()
+	buckets := make(map[string]*BucketInfo, len(m.buckets))
+	for name, info := range m.buckets {
+		buckets[name] = info
+	}
+	m.mu.RUnlock()
+
+	for name, info := range buckets {
+		if info == nil {
+			continue
+		}
+
+		oc, ok := counts[name]
+		if !ok {
+			continue
+		}
+
+		if info.SetOperationCount(OperationTypeA, oc.CountA) {
+			log.Printf("Bucket %s disabled after exceeding A-type operation limit (persisted)", name)
+		}
+		if info.SetOperationCount(OperationTypeB, oc.CountB) {
+			log.Printf("Bucket %s disabled after exceeding B-type operation limit (persisted)", name)
+		}
+	}
 }
 
 // createS3Client 创建S3客户端
@@ -128,12 +184,16 @@ func (m *Manager) initHealthMonitoring() {
 
 	// 创建S3健康检查器
 	healthChecker := health.NewS3Checker(healthConfig)
+	// 设置操作记录器以统计健康检查的 ListObjects 操作
+	healthChecker.SetOperationRecorder(reporter)
 
 	// 创建健康监控器
 	m.healthMonitor = health.NewMonitor(healthChecker, reporter)
 
 	// 创建统计收集器
 	statsCollector := health.NewS3StatsCollector(30 * time.Second)
+	// 设置操作记录器以统计 Stats 收集的 ListObjects 操作
+	statsCollector.SetOperationRecorder(reporter)
 
 	// 创建统计监控器
 	m.statsMonitor = health.NewStatsMonitor(
@@ -267,11 +327,113 @@ func (b *BucketInfo) UpdateUsedSize(delta int64) {
 	b.UsedSize += delta
 }
 
+// RecordOperation 记录一次后端操作并根据配置判断是否需要禁用存储桶
+func (b *BucketInfo) RecordOperation(category OperationCategory) bool {
+	if b == nil {
+		return false
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.Config.Virtual {
+		return false
+	}
+
+	var (
+		limit int64
+		count *int64
+	)
+
+	switch category {
+	case OperationTypeA:
+		b.operationCountA++
+		count = &b.operationCountA
+		limit = int64(b.Config.OperationLimits.TypeA)
+	case OperationTypeB:
+		b.operationCountB++
+		count = &b.operationCountB
+		limit = int64(b.Config.OperationLimits.TypeB)
+	default:
+		return false
+	}
+
+	if limit <= 0 || count == nil {
+		return false
+	}
+
+	if !b.operationLimitReached && *count >= limit {
+		b.Available = false
+		b.operationLimitReached = true
+		return true
+	}
+
+	return false
+}
+
+// SetOperationCount 设置指定类别的操作计数并检查上限
+func (b *BucketInfo) SetOperationCount(category OperationCategory, value int64) bool {
+	if b == nil {
+		return false
+	}
+
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.Config.Virtual {
+		return false
+	}
+
+	var limit int64
+
+	switch category {
+	case OperationTypeA:
+		b.operationCountA = value
+		limit = int64(b.Config.OperationLimits.TypeA)
+	case OperationTypeB:
+		b.operationCountB = value
+		limit = int64(b.Config.OperationLimits.TypeB)
+	default:
+		return false
+	}
+
+	if limit <= 0 {
+		return false
+	}
+
+	if !b.operationLimitReached && value >= limit {
+		b.Available = false
+		b.operationLimitReached = true
+		return true
+	}
+
+	return false
+}
+
 // IsVirtual 检查是否为虚拟存储桶
 func (b *BucketInfo) IsVirtual() bool {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return b.Config.Virtual
+}
+
+// GetOperationCount 获取指定类型的操作计数
+func (b *BucketInfo) GetOperationCount(category OperationCategory) int64 {
+	if b == nil {
+		return 0
+	}
+
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+
+	switch category {
+	case OperationTypeA:
+		return b.operationCountA
+	case OperationTypeB:
+		return b.operationCountB
+	default:
+		return 0
+	}
 }
 
 // GetVirtualBuckets 获取所有虚拟存储桶
@@ -370,6 +532,8 @@ func (m *Manager) UpdateConfig(newConfig *config.Config) error {
 	}
 
 	m.mu.Unlock()
+
+	m.loadOperationCounts()
 
 	if restartMonitors {
 		m.startMonitors()

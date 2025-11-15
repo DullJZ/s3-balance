@@ -36,6 +36,11 @@ var (
 		Name: "s3_balance_balancer_decisions_total",
 		Help: "Total number of load balancing decisions",
 	}, []string{"strategy", "bucket"})
+
+	backendOperationsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "s3_balance_backend_operations_total",
+		Help: "Total number of backend bucket operations by category",
+	}, []string{"bucket", "category"})
 )
 
 type Metrics struct{}
@@ -67,4 +72,8 @@ func (m *Metrics) RecordS3OperationDuration(operation, bucket string, duration f
 
 func (m *Metrics) RecordBalancerDecision(strategy, bucket string) {
 	balancerDecisions.WithLabelValues(strategy, bucket).Inc()
+}
+
+func (m *Metrics) RecordBackendOperation(bucket, category string) {
+	backendOperationsTotal.WithLabelValues(bucket, category).Inc()
 }

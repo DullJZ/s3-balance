@@ -19,6 +19,21 @@ jobs:
       run: |
         echo "VERSION=$(cat VERSION | tr -d '\n')" >> $GITHUB_ENV
 
+    - name: Download frontend assets
+      run: |
+        echo "Downloading latest frontend build from s3-balance-web..."
+        LATEST_RELEASE=$(curl -s https://api.github.com/repos/DullJZ/s3-balance-web/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        echo "Latest frontend release: $LATEST_RELEASE"
+
+        curl -L -o dist.tar.gz "https://github.com/DullJZ/s3-balance-web/releases/download/$LATEST_RELEASE/dist.tar.gz"
+
+        mkdir -p internal/webui/dist
+        tar -xzf dist.tar.gz -C internal/webui/
+        rm dist.tar.gz
+
+        echo "Frontend assets downloaded and extracted to internal/webui/dist"
+        ls -la internal/webui/dist/
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v2
       with:
@@ -61,6 +76,21 @@ jobs:
     - name: Set VERSION
       run: |
         echo "VERSION=$(cat VERSION | tr -d '\n')" >> $GITHUB_ENV
+
+    - name: Download frontend assets
+      run: |
+        echo "Downloading latest frontend build from s3-balance-web..."
+        LATEST_RELEASE=$(curl -s https://api.github.com/repos/DullJZ/s3-balance-web/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+        echo "Latest frontend release: $LATEST_RELEASE"
+
+        curl -L -o dist.tar.gz "https://github.com/DullJZ/s3-balance-web/releases/download/$LATEST_RELEASE/dist.tar.gz"
+
+        mkdir -p internal/webui/dist
+        tar -xzf dist.tar.gz -C internal/webui/
+        rm dist.tar.gz
+
+        echo "Frontend assets downloaded and extracted to internal/webui/dist"
+        ls -la internal/webui/dist/
 
     - name: Setup Go
       uses: actions/setup-go@v2

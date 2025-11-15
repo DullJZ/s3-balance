@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -10,6 +11,12 @@ import (
 // Service 存储服务（管理对象元数据）
 type Service struct {
 	db *gorm.DB
+}
+
+// OperationCounts 后端操作计数
+type OperationCounts struct {
+	CountA int64
+	CountB int64
 }
 
 // NewService 创建新的存储服务
@@ -252,6 +259,95 @@ func (s *Service) updateBucketStats(bucketName string) error {
 	}
 
 	return nil
+}
+
+func (s *Service) ensureBucketStats(bucketName string) (*BucketStats, error) {
+	if bucketName == "" {
+		return nil, fmt.Errorf("bucket name cannot be empty")
+	}
+
+	stats := &BucketStats{}
+	err := s.db.Where("bucket_name = ?", bucketName).First(stats).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		stats = &BucketStats{BucketName: bucketName, LastCheckedAt: time.Now()}
+		if createErr := s.db.Create(stats).Error; createErr != nil {
+			// 如果在并发创建下出现重复键，忽略并再次查询
+			if errors.Is(createErr, gorm.ErrDuplicatedKey) {
+				if retryErr := s.db.Where("bucket_name = ?", bucketName).First(stats).Error; retryErr != nil {
+					return nil, fmt.Errorf("failed to fetch bucket stats after duplicate: %w", retryErr)
+				}
+			} else {
+				return nil, fmt.Errorf("failed to create bucket stats: %w", createErr)
+			}
+		}
+		return stats, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to fetch bucket stats: %w", err)
+	}
+
+	return stats, nil
+}
+
+// IncrementBucketOperation 增加指定存储桶的操作计数
+func (s *Service) IncrementBucketOperation(bucketName, category string) (int64, error) {
+	if _, err := s.ensureBucketStats(bucketName); err != nil {
+		return 0, err
+	}
+
+	var field string
+	switch category {
+	case "A":
+		field = "operation_count_a"
+	case "B":
+		field = "operation_count_b"
+	default:
+		return 0, fmt.Errorf("unknown operation category: %s", category)
+	}
+
+	// 使用事务确保原子性
+	var count int64
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		// 原子递增
+		if err := tx.Model(&BucketStats{}).
+			Where("bucket_name = ?", bucketName).
+			UpdateColumn(field, gorm.Expr(field+" + ?", 1)).Error; err != nil {
+			return fmt.Errorf("failed to increment %s for bucket %s: %w", field, bucketName, err)
+		}
+
+		// 在同一事务中读取最新值
+		if err := tx.Model(&BucketStats{}).
+			Where("bucket_name = ?", bucketName).
+			Select(field).
+			Scan(&count).Error; err != nil {
+			return fmt.Errorf("failed to fetch updated %s for bucket %s: %w", field, bucketName, err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
+// GetBucketOperationCounts 获取所有存储桶的操作计数
+func (s *Service) GetBucketOperationCounts() (map[string]OperationCounts, error) {
+	var stats []BucketStats
+	if err := s.db.Find(&stats).Error; err != nil {
+		return nil, fmt.Errorf("failed to list bucket stats: %w", err)
+	}
+
+	result := make(map[string]OperationCounts, len(stats))
+	for _, st := range stats {
+		result[st.BucketName] = OperationCounts{
+			CountA: st.OperationCountA,
+			CountB: st.OperationCountB,
+		}
+	}
+
+	return result, nil
 }
 
 // RecordUploadSession 记录上传会话
@@ -544,4 +640,176 @@ func (s *Service) DeleteVirtualBucketFileMapping(virtualBucketName, objectKey st
 		return fmt.Errorf("failed to delete virtual bucket file mapping: %w", err)
 	}
 	return nil
+}
+
+// ArchiveMonthlyStats 归档指定月份的统计数据（存储增量值，非累计值）
+// 如果该月份的记录已存在，则更新；否则创建新记录
+func (s *Service) ArchiveMonthlyStats(year, month int) error {
+	// 获取当前所有bucket的累计统计
+	var currentStats []BucketStats
+	if err := s.db.Find(&currentStats).Error; err != nil {
+		return fmt.Errorf("failed to fetch bucket stats: %w", err)
+	}
+
+	// 获取上个月的累计值（从上月归档数据推算）
+	lastYear, lastMonth := year, month-1
+	if lastMonth == 0 {
+		lastMonth = 12
+		lastYear--
+	}
+
+	// 查询上个月及之前的所有归档数据，用于推算上月末的累计值
+	var lastMonthArchived []BucketMonthlyStats
+	lastMonthMap := make(map[string]int64) // bucket_name -> last_month_cumulative_a
+	lastMonthMapB := make(map[string]int64) // bucket_name -> last_month_cumulative_b
+
+	if err := s.db.Where("year < ? OR (year = ? AND month <= ?)", lastYear, lastYear, lastMonth).
+		Order("year ASC, month ASC").
+		Find(&lastMonthArchived).Error; err == nil {
+
+		// 累加历史增量得到上月末累计值
+		cumulativeA := make(map[string]int64)
+		cumulativeB := make(map[string]int64)
+
+		for _, archived := range lastMonthArchived {
+			cumulativeA[archived.BucketName] += archived.OperationCountA
+			cumulativeB[archived.BucketName] += archived.OperationCountB
+		}
+
+		lastMonthMap = cumulativeA
+		lastMonthMapB = cumulativeB
+	}
+
+	// 对每个bucket，计算本月增量并存储
+	for _, stat := range currentStats {
+		lastCumulativeA := lastMonthMap[stat.BucketName]
+		lastCumulativeB := lastMonthMapB[stat.BucketName]
+
+		incrementA := stat.OperationCountA - lastCumulativeA
+		incrementB := stat.OperationCountB - lastCumulativeB
+
+		// 如果是首次运行（没有历史数据），incrementA/B 可能等于累计值
+		// 这是预期行为：首月记录的就是从0到当前的增量
+
+		// 边界情况：如果计算出负值，说明数据不一致，设置为0
+		if incrementA < 0 {
+			incrementA = 0
+		}
+		if incrementB < 0 {
+			incrementB = 0
+		}
+
+		monthlyStats := BucketMonthlyStats{
+			BucketName:      stat.BucketName,
+			Year:            year,
+			Month:           month,
+			OperationCountA: incrementA,
+			OperationCountB: incrementB,
+		}
+
+		// 使用 UPSERT 逻辑：如果存在则更新，否则创建
+		if err := s.db.Where("bucket_name = ? AND year = ? AND month = ?",
+			stat.BucketName, year, month).
+			Assign(BucketMonthlyStats{
+				OperationCountA: incrementA,
+				OperationCountB: incrementB,
+			}).
+			FirstOrCreate(&monthlyStats).Error; err != nil {
+			return fmt.Errorf("failed to archive monthly stats for bucket %s: %w", stat.BucketName, err)
+		}
+	}
+
+	return nil
+}
+
+// GetMonthlyStats 获取指定月份的统计数据
+func (s *Service) GetMonthlyStats(year, month int) ([]BucketMonthlyStats, error) {
+	var stats []BucketMonthlyStats
+	if err := s.db.Where("year = ? AND month = ?", year, month).
+		Find(&stats).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch monthly stats: %w", err)
+	}
+	return stats, nil
+}
+
+// GetMonthlyStatsRange 获取指定时间范围的统计数据
+func (s *Service) GetMonthlyStatsRange(startYear, startMonth, endYear, endMonth int) ([]BucketMonthlyStats, error) {
+	var stats []BucketMonthlyStats
+	if err := s.db.Where("(year > ? OR (year = ? AND month >= ?)) AND (year < ? OR (year = ? AND month <= ?))",
+		startYear, startYear, startMonth, endYear, endYear, endMonth).
+		Order("year, month, bucket_name").
+		Find(&stats).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch monthly stats range: %w", err)
+	}
+	return stats, nil
+}
+
+// GetCurrentMonthStats 获取当前月份的实时统计（从 bucket_stats 计算增量）
+func (s *Service) GetCurrentMonthStats() ([]BucketMonthlyStats, error) {
+	now := time.Now()
+	year, month := now.Year(), int(now.Month())
+
+	// 获取上个月末的累计值（通过累加所有历史增量）
+	lastYear, lastMonth := year, month-1
+	if lastMonth == 0 {
+		lastMonth = 12
+		lastYear--
+	}
+
+	var historicalStats []BucketMonthlyStats
+	lastMonthCumulativeA := make(map[string]int64)
+	lastMonthCumulativeB := make(map[string]int64)
+
+	if err := s.db.Where("year < ? OR (year = ? AND month <= ?)", lastYear, lastYear, lastMonth).
+		Find(&historicalStats).Error; err == nil {
+		// 累加所有历史增量得到上月末累计值
+		for _, stat := range historicalStats {
+			lastMonthCumulativeA[stat.BucketName] += stat.OperationCountA
+			lastMonthCumulativeB[stat.BucketName] += stat.OperationCountB
+		}
+	}
+
+	// 获取当前累计数据
+	var currentStats []BucketStats
+	if err := s.db.Find(&currentStats).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch current bucket stats: %w", err)
+	}
+
+	// 计算当前月份的增量
+	result := make([]BucketMonthlyStats, 0, len(currentStats))
+	for _, current := range currentStats {
+		incrementA := current.OperationCountA - lastMonthCumulativeA[current.BucketName]
+		incrementB := current.OperationCountB - lastMonthCumulativeB[current.BucketName]
+
+		// 边界情况：如果计算出负值，说明数据不一致，设置为0
+		if incrementA < 0 {
+			incrementA = 0
+		}
+		if incrementB < 0 {
+			incrementB = 0
+		}
+
+		result = append(result, BucketMonthlyStats{
+			BucketName:      current.BucketName,
+			Year:            year,
+			Month:           month,
+			OperationCountA: incrementA,
+			OperationCountB: incrementB,
+			UpdatedAt:       time.Now(),
+		})
+	}
+
+	return result, nil
+}
+
+// GetBucketMonthlyHistory 获取指定存储桶的月度历史统计
+func (s *Service) GetBucketMonthlyHistory(bucketName string, months int) ([]BucketMonthlyStats, error) {
+	var stats []BucketMonthlyStats
+	if err := s.db.Where("bucket_name = ?", bucketName).
+		Order("year DESC, month DESC").
+		Limit(months).
+		Find(&stats).Error; err != nil {
+		return nil, fmt.Errorf("failed to fetch bucket monthly history: %w", err)
+	}
+	return stats, nil
 }

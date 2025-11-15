@@ -76,6 +76,8 @@ func (h *S3Handler) handleUploadPart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeA)
+
 	// 检查当前已上传大小 + 本次分片大小是否超过bucket剩余空间
 	currentSize, err := h.storage.GetUploadSessionSize(uploadID)
 	if err != nil {
@@ -213,6 +215,8 @@ func (h *S3Handler) handleMultipartUpload(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeA)
+
 	// 初始化分片上传
 	ctx := context.Background()
 	createResp, err := targetBucket.Client.CreateMultipartUpload(ctx, &s3.CreateMultipartUploadInput{
@@ -280,14 +284,16 @@ func (h *S3Handler) handleListMultipartUploads(w http.ResponseWriter, r *http.Re
 			// 降级到遍历所有存储桶的方式
 			ctx := context.Background()
 			allBuckets := h.bucketManager.GetAllBuckets()
-			for _, bucket := range allBuckets {
-				if bucket.IsVirtual() {
+			for _, realBucket := range allBuckets {
+				if realBucket.IsVirtual() {
 					continue
 				}
 
+				h.recordBackendOperation(realBucket, bucket.OperationTypeB)
+
 				// 列出每个真实存储桶的分片上传
-				listResp, err := bucket.Client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{
-					Bucket:         aws.String(bucket.Config.Name),
+				listResp, err := realBucket.Client.ListMultipartUploads(ctx, &s3.ListMultipartUploadsInput{
+					Bucket:         aws.String(realBucket.Config.Name),
 					KeyMarker:      aws.String(keyMarker),
 					UploadIdMarker: aws.String(uploadIdMarker),
 					Prefix:         aws.String(prefix),
@@ -295,7 +301,7 @@ func (h *S3Handler) handleListMultipartUploads(w http.ResponseWriter, r *http.Re
 					MaxUploads:     aws.Int32(int32(maxUploads)),
 				})
 				if err != nil {
-					log.Printf("Failed to list multipart uploads for bucket %s: %v", bucket.Config.Name, err)
+					log.Printf("Failed to list multipart uploads for bucket %s: %v", realBucket.Config.Name, err)
 					continue
 				}
 
@@ -409,21 +415,22 @@ func (h *S3Handler) handleListMultipartParts(w http.ResponseWriter, r *http.Requ
 		if err != nil {
 			// 如果没有找到映射，尝试查询所有真实存储桶
 			allBuckets := h.bucketManager.GetAllBuckets()
-			for _, bucket := range allBuckets {
-				if bucket.IsVirtual() {
+			for _, realBucket := range allBuckets {
+				if realBucket.IsVirtual() {
 					continue
 				}
 				// 尝试列出分片，如果成功则说明上传在这个桶中
 				ctx := context.Background()
-				_, err := bucket.Client.ListParts(ctx, &s3.ListPartsInput{
-					Bucket:           aws.String(bucket.Config.Name),
+				h.recordBackendOperation(realBucket, bucket.OperationTypeB)
+				_, err := realBucket.Client.ListParts(ctx, &s3.ListPartsInput{
+					Bucket:           aws.String(realBucket.Config.Name),
 					Key:              aws.String(key),
 					UploadId:         aws.String(uploadID),
 					PartNumberMarker: aws.String(strconv.Itoa(partNumberMarker)),
 					MaxParts:         aws.Int32(1), // 只检查是否存在
 				})
 				if err == nil {
-					targetBucket = bucket
+					targetBucket = realBucket
 					break
 				}
 			}
@@ -446,6 +453,7 @@ func (h *S3Handler) handleListMultipartParts(w http.ResponseWriter, r *http.Requ
 	}
 
 	// 列出分片
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeB)
 	ctx := context.Background()
 	listResp, err := targetBucket.Client.ListParts(ctx, &s3.ListPartsInput{
 		Bucket:           aws.String(targetBucket.Config.Name),
@@ -570,6 +578,7 @@ func (h *S3Handler) handleCompleteMultipartUpload(w http.ResponseWriter, r *http
 
 	// 完成分片上传
 	ctx := context.Background()
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeA)
 	sort.SliceStable(completeReq.Parts, func(i, j int) bool {
 		return completeReq.Parts[i].PartNumber < completeReq.Parts[j].PartNumber
 	})
@@ -611,6 +620,7 @@ func (h *S3Handler) handleCompleteMultipartUpload(w http.ResponseWriter, r *http
 
 	// 获取完成上传后的对象大小
 	var objectSize int64
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeB)
 	headResp, err := targetBucket.Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(targetBucket.Config.Name),
 		Key:    aws.String(key),
@@ -658,6 +668,7 @@ func getAPIError(err error) (smithy.APIError, bool) {
 
 // abortMultipartUploadInternal 内部方法：向后端S3发送中止分片上传请求
 func (h *S3Handler) abortMultipartUploadInternal(targetBucket *bucket.BucketInfo, key, uploadID string) error {
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeA)
 	ctx := context.Background()
 	_, err := targetBucket.Client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
 		Bucket:   aws.String(targetBucket.Config.Name),
@@ -718,6 +729,7 @@ func (h *S3Handler) handleAbortMultipartUpload(w http.ResponseWriter, r *http.Re
 
 	// 中止分片上传
 	ctx := context.Background()
+	h.recordBackendOperation(targetBucket, bucket.OperationTypeA)
 	_, err := targetBucket.Client.AbortMultipartUpload(ctx, &s3.AbortMultipartUploadInput{
 		Bucket:   aws.String(targetBucket.Config.Name),
 		Key:      aws.String(key),

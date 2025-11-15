@@ -26,7 +26,8 @@ type Stats struct {
 
 // S3StatsCollector S3统计信息收集器
 type S3StatsCollector struct {
-	timeout time.Duration
+	timeout    time.Duration
+	opRecorder OperationRecorder
 }
 
 // NewS3StatsCollector 创建S3统计信息收集器
@@ -37,6 +38,11 @@ func NewS3StatsCollector(timeout time.Duration) *S3StatsCollector {
 	return &S3StatsCollector{
 		timeout: timeout,
 	}
+}
+
+// SetOperationRecorder 设置操作记录器
+func (c *S3StatsCollector) SetOperationRecorder(recorder OperationRecorder) {
+	c.opRecorder = recorder
 }
 
 // CollectStats 收集S3存储桶统计信息
@@ -58,6 +64,12 @@ func (c *S3StatsCollector) CollectStats(ctx context.Context, target Target) (*St
 			Bucket:            aws.String(s3Target.Bucket),
 			ContinuationToken: continuationToken,
 		})
+
+		// 记录操作（每次 ListObjectsV2 调用都是 Class A 操作）
+		if c.opRecorder != nil {
+			c.opRecorder.RecordOperation(s3Target.GetID(), OperationTypeA)
+		}
+
 		if err != nil {
 			return nil, err
 		}

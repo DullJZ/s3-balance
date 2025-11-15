@@ -66,3 +66,19 @@ type HealthReporter interface {
 	// ReportHealth 报告健康状态
 	ReportHealth(targetID string, status Status)
 }
+
+// OperationCategory 操作分类
+type OperationCategory string
+
+const (
+	// OperationTypeA 写入类操作 (ListObjects, PutObject, etc.)
+	OperationTypeA OperationCategory = "A"
+	// OperationTypeB 读取类操作 (GetObject)
+	OperationTypeB OperationCategory = "B"
+)
+
+// OperationRecorder 操作记录器接口
+type OperationRecorder interface {
+	// RecordOperation 记录一次后端操作
+	RecordOperation(targetID string, category OperationCategory)
+}

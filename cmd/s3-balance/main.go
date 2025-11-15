@@ -17,7 +17,11 @@ import (
 	"github.com/DullJZ/s3-balance/internal/config"
 	"github.com/DullJZ/s3-balance/internal/database"
 	"github.com/DullJZ/s3-balance/internal/metrics"
+	"github.com/DullJZ/s3-balance/internal/middleware"
+	"github.com/DullJZ/s3-balance/internal/scheduler"
 	"github.com/DullJZ/s3-balance/internal/storage"
+	"github.com/DullJZ/s3-balance/internal/web"
+	"github.com/DullJZ/s3-balance/internal/webui"
 	"github.com/DullJZ/s3-balance/pkg/presigner"
 	"github.com/gorilla/mux"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -26,8 +30,16 @@ import (
 func main() {
 	// 解析命令行参数
 	var configFile string
+	var onlyWeb bool
 	flag.StringVar(&configFile, "config", "config/config.yaml", "Path to configuration file")
+	flag.BoolVar(&onlyWeb, "only-web", false, "Only serve web UI, no backend services")
 	flag.Parse()
+
+	// 如果是只提供Web前端模式
+	if onlyWeb {
+		startWebOnlyMode(configFile)
+		return
+	}
 
 	// 创建配置管理器
 	configManager, err := config.NewManager(configFile)
@@ -45,11 +57,14 @@ func main() {
 	}
 	defer database.Close()
 
+	// 创建存储服务
+	storageService := storage.NewService(database.GetDB())
+
 	// 创建指标服务
 	metricsService := metrics.New()
 
 	// 创建存储桶管理器
-	bucketManager, err := bucket.NewManager(cfg, metricsService)
+	bucketManager, err := bucket.NewManager(cfg, metricsService, storageService)
 	if err != nil {
 		log.Fatalf("Failed to create bucket manager: %v", err)
 	}
@@ -74,11 +89,13 @@ func main() {
 		60*time.Minute, // 下载URL有效期
 	)
 
-	// 创建存储服务
-	storageService := storage.NewService(database.GetDB())
-
 	// 启动定期清理过期上传会话的任务
 	startSessionCleaner(ctx, storageService)
+
+	// 启动月度统计归档任务（每小时检查一次）
+	monthlyArchiver := scheduler.NewMonthlyArchiver(storageService, 1*time.Hour)
+	monthlyArchiver.Start()
+	defer monthlyArchiver.Stop()
 
 	// 创建S3兼容API处理器
 	s3Handler := api.NewS3Handler(
@@ -123,6 +140,32 @@ func main() {
 		router.Path(cfg.Metrics.Path).Handler(promhttp.Handler())
 		log.Printf("Metrics server enabled at %s", cfg.Metrics.Path)
 	}
+
+	// 注册管理API路由（如果启用）
+	// 必须在S3路由之前注册，因为S3路由使用 /{bucket} 通配符会匹配所有路径
+	if cfg.API.Enabled {
+		log.Println("Management API enabled")
+		adminHandler := api.NewAdminHandler(bucketManager, lb, cfg, configManager)
+		statsHandler := api.NewStatsHandler(storageService)
+
+		// 创建子路由器并应用中间件
+		apiRouter := router.PathPrefix("/api").Subrouter()
+		apiRouter.Use(corsMiddleware) // 先应用 CORS 中间件，处理 OPTIONS 预检请求
+		apiRouter.Use(middleware.TokenAuthMiddleware(cfg.API.Token))
+		adminHandler.RegisterRoutes(apiRouter)
+		statsHandler.RegisterRoutes(apiRouter)
+
+		log.Printf("Management API endpoints available at /api/*")
+	}
+
+	// 注册Web管理界面
+	distSubFS, err := webui.GetDistFS()
+	if err != nil {
+		log.Fatalf("Failed to load embedded web UI: %v", err)
+	}
+	webHandler := web.NewHandler(distSubFS)
+	router.PathPrefix("/web").Handler(http.StripPrefix("/web", webHandler))
+	log.Println("Web UI available at /web")
 
 	// 运行在S3兼容模式
 	log.Println("Running in S3-compatible mode")
@@ -273,4 +316,78 @@ func cleanupS3MultipartUploads(_ context.Context, storageService *storage.Servic
 			// 但需要知道对应的真实存储桶信息
 		}
 	}
+}
+
+// startWebOnlyMode 只启动Web前端服务，不启动后端服务
+func startWebOnlyMode(configFile string) {
+	log.Println("Starting in web-only mode (no backend services)")
+
+	// 加载配置文件以获取端口等信息
+	configManager, err := config.NewManager(configFile)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+	defer configManager.Close()
+
+	cfg := configManager.GetConfig()
+
+	// 创建路由器
+	router := mux.NewRouter()
+
+	// 加载嵌入的前端资源
+	distSubFS, err := webui.GetDistFS()
+	if err != nil {
+		log.Fatalf("Failed to load embedded web UI: %v", err)
+	}
+
+	// 注册Web前端路由
+	webHandler := web.NewHandler(distSubFS)
+
+	// 根路径重定向到 /web
+	router.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/web/", http.StatusMovedPermanently)
+	})
+
+	// Web UI 路由
+	router.PathPrefix("/web").Handler(http.StripPrefix("/web", webHandler))
+
+	// 添加 CORS 和日志中间件
+	router.Use(corsMiddleware)
+	router.Use(loggingMiddleware)
+
+	// 使用配置文件中的端口
+	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      router,
+		ReadTimeout:  cfg.Server.ReadTimeout,
+		WriteTimeout: cfg.Server.WriteTimeout,
+		IdleTimeout:  cfg.Server.IdleTimeout,
+	}
+
+	log.Println("Web UI available at /web")
+	log.Printf("Starting web server on %s", srv.Addr)
+
+	// 启动服务器
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// 等待中断信号
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+	<-sigChan
+
+	// 优雅关闭
+	log.Println("Shutting down web server...")
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
+	}
+
+	log.Println("Web server stopped")
 }

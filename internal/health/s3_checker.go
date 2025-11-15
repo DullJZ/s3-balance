@@ -34,7 +34,8 @@ func (t *S3Target) GetEndpoint() string {
 
 // S3Checker S3健康检查器
 type S3Checker struct {
-	config Config
+	config    Config
+	opRecorder OperationRecorder
 }
 
 // NewS3Checker 创建S3健康检查器
@@ -52,6 +53,11 @@ func NewS3Checker(config Config) *S3Checker {
 	return &S3Checker{
 		config: config,
 	}
+}
+
+// SetOperationRecorder 设置操作记录器
+func (c *S3Checker) SetOperationRecorder(recorder OperationRecorder) {
+	c.opRecorder = recorder
 }
 
 // Check 执行S3健康检查
@@ -121,6 +127,12 @@ func (c *S3Checker) performSimpleCheck(ctx context.Context, target *S3Target) er
 		Bucket:  aws.String(target.Bucket),
 		MaxKeys: aws.Int32(1),
 	})
+
+	// 记录操作（ListObjectsV2 是 Class A 操作）
+	if c.opRecorder != nil {
+		c.opRecorder.RecordOperation(target.GetID(), OperationTypeA)
+	}
+
 	return err
 }
 

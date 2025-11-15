@@ -181,6 +181,7 @@ func AutoMigrate() error {
 	models := []interface{}{
 		&storage.Object{},
 		&storage.BucketStats{},
+		&storage.BucketMonthlyStats{},
 		&storage.UploadSession{},
 		&storage.AccessLog{},
 		&storage.VirtualBucketMapping{},
